@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const mysql = require('mysql2/promise');
+const { pool } = require('./db');
 const apiRoutes = require('./routes/api');
 
 const app = express();
@@ -18,18 +18,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// Create a connection pool
-const pool = mysql.createPool({
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT) || 3306,
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-    enableKeepAlive: true
-});
+
 
 // Test connection on startup
 pool.getConnection()

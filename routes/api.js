@@ -1,21 +1,10 @@
 const { Router } = require('express');
-const mysql = require('mysql2/promise');
-require('dotenv').config();
-
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const router = Router();
 
-// Database pool
-const pool = mysql.createPool({
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT) || 3307,
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-    enableKeepAlive: true
-});
+// Import pool from db
+const { pool } = require('../db');
 
 // ==================== USER CRUD ====================
 
@@ -82,6 +71,68 @@ router.delete('/users/:userID', async (req, res) => {
         await connection.query('DELETE FROM User WHERE userID = ?', [req.params.userID]);
         connection.release();
         res.json({ success: true, message: 'User deleted' });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ==================== AUTHENTICATION ====================
+
+// LOGIN - Staff authentication
+router.post('/login', async (req, res) => {
+    try {
+        const { NRIC, password } = req.body;
+        
+        if (!NRIC || !password) {
+            return res.status(400).json({ success: false, error: 'NRIC and password are required' });
+        }
+        
+        const connection = await pool.getConnection();
+        
+        // Get user and password hash from database
+        const [users] = await connection.query(
+            'SELECT u.userID, u.fullName, u.NRIC, u.role, u.image_url, s.password FROM User u JOIN Staff s ON u.userID = s.userID WHERE u.NRIC = ?',
+            [NRIC]
+        );
+        
+        connection.release();
+        
+        if (!users || users.length === 0) {
+            return res.status(401).json({ success: false, error: 'Invalid NRIC or password' });
+        }
+        
+        const user = users[0];
+        
+        // Compare provided password with hashed password
+        const isPasswordValid = await bcrypt.compare(password, user.password);
+        
+        if (!isPasswordValid) {
+            return res.status(401).json({ success: false, error: 'Invalid NRIC or password' });
+        }
+        
+        // Generate JWT token
+        const token = jwt.sign(
+            { 
+                userID: user.userID, 
+                NRIC: user.NRIC, 
+                role: user.role 
+            },
+            process.env.JWT_SECRET || 'your_secret_key_change_in_production',
+            { expiresIn: '24h' }
+        );
+        
+        // Return user info and token (exclude password)
+        res.json({ 
+            success: true, 
+            token,
+            data: {
+                userID: user.userID,
+                fullName: user.fullName,
+                NRIC: user.NRIC,
+                role: user.role,
+                image_url: user.image_url
+            }
+        });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
@@ -207,13 +258,16 @@ router.post('/staff', async (req, res) => {
         const { fullName, NRIC, password, image_url } = req.body;
         const connection = await pool.getConnection();
         
+        // Hash the password
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
         const [userResult] = await connection.query(
             'INSERT INTO User (fullName, NRIC, role, image_url) VALUES (?, ?, ?, ?)',
             [fullName, NRIC, 'staff', image_url]
         );
         
         await connection.query('INSERT INTO Staff (userID, password) VALUES (?, ?)', 
-            [userResult.insertId, password]);
+            [userResult.insertId, hashedPassword]);
         connection.release();
         
         res.status(201).json({ success: true, userID: userResult.insertId });
@@ -227,8 +281,12 @@ router.put('/staff/:userID', async (req, res) => {
     try {
         const { password } = req.body;
         const connection = await pool.getConnection();
+        
+        // Hash the password
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
         await connection.query('UPDATE Staff SET password = ? WHERE userID = ?', 
-            [password, req.params.userID]);
+            [hashedPassword, req.params.userID]);
         connection.release();
         res.json({ success: true, message: 'Staff updated' });
     } catch (error) {
@@ -278,7 +336,28 @@ router.get('/events/:eventID', async (req, res) => {
 router.post('/events', async (req, res) => {
     try {
         const { eventName, eventDescription, disabled_friendly, datetime, location, additional_information, created_by } = req.body;
+        
+        // Authenticate: verify that created_by user is staff
+        if (!created_by) {
+            return res.status(400).json({ success: false, error: 'created_by is required' });
+        }
+        
         const connection = await pool.getConnection();
+        
+        // Check if user exists and has staff role
+        const [user] = await connection.query('SELECT role FROM User WHERE userID = ?', [created_by]);
+        
+        if (!user || user.length === 0) {
+            connection.release();
+            return res.status(401).json({ success: false, error: 'User not found' });
+        }
+        
+        if (user[0].role !== 'staff') {
+            connection.release();
+            return res.status(403).json({ success: false, error: 'Only staff members can create events' });
+        }
+        
+        // Create event
         const [result] = await connection.query(
             'INSERT INTO Event (eventName, eventDescription, disabled_friendly, datetime, location, additional_information, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
             [eventName, eventDescription, disabled_friendly, datetime, location, additional_information, created_by]
