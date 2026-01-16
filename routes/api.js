@@ -406,6 +406,115 @@ router.post('/login', async (req, res) => {
 
 /**
  * @swagger
+ * /api/login-otp:
+ *   post:
+ *     summary: Login with OTP
+ *     description: Authenticate a participant with phone number and OTP
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phone
+ *               - otp
+ *             properties:
+ *               phone:
+ *                 type: string
+ *               otp:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse'
+ *       401:
+ *         description: Invalid OTP
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ */
+// LOGIN with OTP - Participant authentication
+router.post('/login-otp', async (req, res) => {
+    try {
+        const { phone, otp } = req.body;
+        
+        if (!phone || !otp) {
+            return res.status(400).json({ success: false, error: 'Phone and OTP are required' });
+        }
+        
+        // Demo OTP validation - accept 123456
+        if (otp !== '123456') {
+            return res.status(401).json({ success: false, error: 'Invalid OTP' });
+        }
+        
+        const connection = await pool.getConnection();
+        
+        // Find or create participant with this phone number
+        let [participants] = await connection.query(
+            'SELECT u.userID, u.fullName, u.role, u.image_url, p.phoneNumber FROM User u JOIN Participant p ON u.userID = p.userID WHERE p.phoneNumber = ?',
+            [phone]
+        );
+        
+        let user;
+        if (!participants || participants.length === 0) {
+            // Create new participant if not found
+            const fullName = 'Participant ' + phone;
+            const [userResult] = await connection.query(
+                'INSERT INTO User (fullName, role, image_url) VALUES (?, ?, ?)',
+                [fullName, 'participant', '']
+            );
+            
+            const [participantResult] = await connection.query(
+                'INSERT INTO Participant (userID, phoneNumber, birthdate) VALUES (?, ?, ?)',
+                [userResult.insertId, phone, '2000-01-01']
+            );
+            
+            user = {
+                userID: userResult.insertId,
+                fullName: fullName,
+                phone: phone,
+                role: 'participant'
+            };
+        } else {
+            user = participants[0];
+        }
+        
+        connection.release();
+        
+        // Generate JWT token
+        const token = jwt.sign(
+            { userID: user.userID, fullName: user.fullName, role: user.role },
+            process.env.JWT_SECRET || 'your_secret_key_change_in_production',
+            { expiresIn: '7d' }
+        );
+        
+        // Return user info and token
+        res.json({ 
+            success: true, 
+            token,
+            data: {
+                userID: user.userID,
+                fullName: user.fullName,
+                phone: user.phone || phone,
+                role: user.role || 'participant'
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * @swagger
  * /api/login/participant:
  *   post:
  *     summary: Login participant
