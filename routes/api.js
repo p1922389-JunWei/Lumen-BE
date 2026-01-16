@@ -6,6 +6,26 @@ const router = Router();
 // Import pool from db
 const { pool } = require('../db');
 
+// ==================== MIDDLEWARE ====================
+
+// Verify JWT token middleware
+const verifyToken = (req, res, next) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader) {
+            return res.status(401).json({ success: false, error: 'Authorization header missing' });
+        }
+        
+        const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+        
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_secret_key_change_in_production');
+        req.user = decoded;
+        next();
+    } catch (error) {
+        res.status(401).json({ success: false, error: 'Invalid or expired token' });
+    }
+};
+
 // ==================== USER CRUD ====================
 
 // GET all users
@@ -333,18 +353,14 @@ router.get('/events/:eventID', async (req, res) => {
 });
 
 // CREATE event
-router.post('/events', async (req, res) => {
+router.post('/events', verifyToken, async (req, res) => {
     try {
-        const { eventName, eventDescription, disabled_friendly, datetime, location, additional_information, created_by } = req.body;
-        
-        // Authenticate: verify that created_by user is staff
-        if (!created_by) {
-            return res.status(400).json({ success: false, error: 'created_by is required' });
-        }
+        const { eventName, eventDescription, disabled_friendly, datetime, location, additional_information } = req.body;
+        const created_by = req.user.userID;
         
         const connection = await pool.getConnection();
         
-        // Check if user exists and has staff role
+        // Check if user has staff role (already verified in token, but double-check)
         const [user] = await connection.query('SELECT role FROM User WHERE userID = ?', [created_by]);
         
         if (!user || user.length === 0) {
