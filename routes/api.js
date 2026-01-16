@@ -296,8 +296,8 @@ router.delete('/users/:userID', async (req, res) => {
  * @swagger
  * /api/login:
  *   post:
- *     summary: Login staff member
- *     description: Authenticate a staff member and receive a JWT token
+ *     summary: Login staff/volunteer
+ *     description: Authenticate a staff member or volunteer with email and password to receive a JWT token
  *     tags:
  *       - Authentication
  *     requestBody:
@@ -307,11 +307,12 @@ router.delete('/users/:userID', async (req, res) => {
  *           schema:
  *             type: object
  *             required:
- *               - NRIC
+ *               - email
  *               - password
  *             properties:
- *               NRIC:
+ *               email:
  *                 type: string
+ *                 format: email
  *               password:
  *                 type: string
  *     responses:
@@ -340,27 +341,35 @@ router.delete('/users/:userID', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// LOGIN - Staff authentication
+// LOGIN - Staff/Volunteer authentication with email and password
 router.post('/login', async (req, res) => {
     try {
-        const { NRIC, password } = req.body;
+        const { email, password } = req.body;
         
-        if (!NRIC || !password) {
-            return res.status(400).json({ success: false, error: 'NRIC and password are required' });
+        if (!email || !password) {
+            return res.status(400).json({ success: false, error: 'Email and password are required' });
         }
         
         const connection = await pool.getConnection();
         
-        // Get user and password hash from database
-        const [users] = await connection.query(
-            'SELECT u.userID, u.fullName, u.NRIC, u.role, u.image_url, s.password FROM User u JOIN Staff s ON u.userID = s.userID WHERE u.NRIC = ?',
-            [NRIC]
+        // Try to find in Staff table first
+        let [users] = await connection.query(
+            'SELECT u.userID, u.fullName, u.role, u.image_url, s.email, s.password FROM User u JOIN Staff s ON u.userID = s.userID WHERE s.email = ?',
+            [email]
         );
+        
+        // If not found in Staff, try Volunteers table
+        if (!users || users.length === 0) {
+            [users] = await connection.query(
+                'SELECT u.userID, u.fullName, u.role, u.image_url, v.email, v.password FROM User u JOIN Volunteers v ON u.userID = v.userID WHERE v.email = ?',
+                [email]
+            );
+        }
         
         connection.release();
         
         if (!users || users.length === 0) {
-            return res.status(401).json({ success: false, error: 'Invalid NRIC or password' });
+            return res.status(401).json({ success: false, error: 'Invalid email or password' });
         }
         
         const user = users[0];
@@ -369,14 +378,14 @@ router.post('/login', async (req, res) => {
         const isPasswordValid = await bcrypt.compare(password, user.password);
         
         if (!isPasswordValid) {
-            return res.status(401).json({ success: false, error: 'Invalid NRIC or password' });
+            return res.status(401).json({ success: false, error: 'Invalid email or password' });
         }
         
         // Generate JWT token
         const token = jwt.sign(
             { 
                 userID: user.userID, 
-                NRIC: user.NRIC, 
+                email: user.email, 
                 role: user.role 
             },
             process.env.JWT_SECRET || 'your_secret_key_change_in_production',
@@ -390,9 +399,105 @@ router.post('/login', async (req, res) => {
             data: {
                 userID: user.userID,
                 fullName: user.fullName,
-                NRIC: user.NRIC,
+                email: user.email,
                 role: user.role,
                 image_url: user.image_url
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * @swagger
+ * /api/login/participant:
+ *   post:
+ *     summary: Login participant
+ *     description: Authenticate a participant with phone number, birthdate and full name
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phoneNumber
+ *               - birthdate
+ *               - fullName
+ *             properties:
+ *               phoneNumber:
+ *                 type: string
+ *               birthdate:
+ *                 type: string
+ *                 format: date
+ *               fullName:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse'
+ *       400:
+ *         description: Missing required fields
+ *       401:
+ *         description: Invalid credentials
+ *       500:
+ *         description: Server error
+ */
+// LOGIN - Participant authentication with phone + birthdate + name
+router.post('/login/participant', async (req, res) => {
+    try {
+        const { phoneNumber, birthdate, fullName } = req.body;
+        
+        if (!phoneNumber || !birthdate || !fullName) {
+            return res.status(400).json({ success: false, error: 'Phone number, birthdate, and full name are required' });
+        }
+        
+        const connection = await pool.getConnection();
+        
+        // Find participant by phone number and verify birthdate and name
+        const [participants] = await connection.query(
+            `SELECT u.userID, u.fullName, u.role, u.image_url, p.phoneNumber, p.birthdate 
+             FROM User u 
+             JOIN Participant p ON u.userID = p.userID 
+             WHERE p.phoneNumber = ? AND p.birthdate = ? AND u.fullName = ?`,
+            [phoneNumber, birthdate, fullName]
+        );
+        
+        connection.release();
+        
+        if (!participants || participants.length === 0) {
+            return res.status(401).json({ success: false, error: 'Invalid credentials. Please check your phone number, birthdate, and name.' });
+        }
+        
+        const participant = participants[0];
+        
+        // Generate JWT token
+        const token = jwt.sign(
+            { 
+                userID: participant.userID, 
+                phoneNumber: participant.phoneNumber, 
+                role: participant.role 
+            },
+            process.env.JWT_SECRET || 'your_secret_key_change_in_production',
+            { expiresIn: '24h' }
+        );
+        
+        // Return participant info and token
+        res.json({ 
+            success: true, 
+            token,
+            data: {
+                userID: participant.userID,
+                fullName: participant.fullName,
+                phoneNumber: participant.phoneNumber,
+                role: participant.role,
+                image_url: participant.image_url
             }
         });
     } catch (error) {
@@ -436,7 +541,7 @@ router.get('/participants', async (req, res) => {
     try {
         const connection = await pool.getConnection();
         const [participants] = await connection.query(
-            'SELECT u.*, p.created_at FROM Participant p JOIN User u ON p.userID = u.userID'
+            'SELECT u.userID, u.fullName, u.role, u.image_url, p.phoneNumber, p.birthdate, p.created_at FROM Participant p JOIN User u ON p.userID = u.userID'
         );
         connection.release();
         res.json({ success: true, data: participants });
@@ -461,12 +566,16 @@ router.get('/participants', async (req, res) => {
  *             type: object
  *             required:
  *               - fullName
- *               - NRIC
+ *               - phoneNumber
+ *               - birthdate
  *             properties:
  *               fullName:
  *                 type: string
- *               NRIC:
+ *               phoneNumber:
  *                 type: string
+ *               birthdate:
+ *                 type: string
+ *                 format: date
  *               image_url:
  *                 type: string
  *     responses:
@@ -491,17 +600,25 @@ router.get('/participants', async (req, res) => {
 // CREATE participant
 router.post('/participants', async (req, res) => {
     try {
-        const { fullName, NRIC, image_url } = req.body;
+        const { fullName, phoneNumber, birthdate, image_url } = req.body;
+        
+        if (!fullName || !phoneNumber || !birthdate) {
+            return res.status(400).json({ success: false, error: 'fullName, phoneNumber, and birthdate are required' });
+        }
+        
         const connection = await pool.getConnection();
         
-        // Insert into User table
+        // Insert into User table (NRIC is now nullable)
         const [userResult] = await connection.query(
-            'INSERT INTO User (fullName, NRIC, role, image_url) VALUES (?, ?, ?, ?)',
-            [fullName, NRIC, 'participant', image_url]
+            'INSERT INTO User (fullName, role, image_url) VALUES (?, ?, ?)',
+            [fullName, 'participant', image_url]
         );
         
-        // Insert into Participant table
-        await connection.query('INSERT INTO Participant (userID) VALUES (?)', [userResult.insertId]);
+        // Insert into Participant table with phoneNumber and birthdate
+        await connection.query(
+            'INSERT INTO Participant (userID, phoneNumber, birthdate) VALUES (?, ?, ?)', 
+            [userResult.insertId, phoneNumber, birthdate]
+        );
         connection.release();
         
         res.status(201).json({ success: true, userID: userResult.insertId });
@@ -606,7 +723,7 @@ router.get('/volunteers', async (req, res) => {
  * /api/volunteers:
  *   post:
  *     summary: Create a new volunteer
- *     description: Create a new volunteer in the system
+ *     description: Create a new volunteer with email and password
  *     tags:
  *       - Volunteers
  *     requestBody:
@@ -617,11 +734,15 @@ router.get('/volunteers', async (req, res) => {
  *             type: object
  *             required:
  *               - fullName
- *               - NRIC
+ *               - email
+ *               - password
  *             properties:
  *               fullName:
  *                 type: string
- *               NRIC:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               password:
  *                 type: string
  *               image_url:
  *                 type: string
@@ -647,15 +768,26 @@ router.get('/volunteers', async (req, res) => {
 // CREATE volunteer
 router.post('/volunteers', async (req, res) => {
     try {
-        const { fullName, NRIC, image_url } = req.body;
+        const { fullName, email, password, image_url } = req.body;
+        
+        if (!fullName || !email || !password) {
+            return res.status(400).json({ success: false, error: 'fullName, email, and password are required' });
+        }
+        
         const connection = await pool.getConnection();
         
+        // Hash the password
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
         const [userResult] = await connection.query(
-            'INSERT INTO User (fullName, NRIC, role, image_url) VALUES (?, ?, ?, ?)',
-            [fullName, NRIC, 'volunteer', image_url]
+            'INSERT INTO User (fullName, role, image_url) VALUES (?, ?, ?)',
+            [fullName, 'volunteer', image_url]
         );
         
-        await connection.query('INSERT INTO Volunteers (userID) VALUES (?)', [userResult.insertId]);
+        await connection.query(
+            'INSERT INTO Volunteers (userID, email, password) VALUES (?, ?, ?)', 
+            [userResult.insertId, email, hashedPassword]
+        );
         connection.release();
         
         res.status(201).json({ success: true, userID: userResult.insertId });
@@ -760,7 +892,7 @@ router.get('/staff', async (req, res) => {
  * /api/staff:
  *   post:
  *     summary: Create a new staff member
- *     description: Create a new staff member with password
+ *     description: Create a new staff member with email and password
  *     tags:
  *       - Staff
  *     requestBody:
@@ -771,13 +903,14 @@ router.get('/staff', async (req, res) => {
  *             type: object
  *             required:
  *               - fullName
- *               - NRIC
+ *               - email
  *               - password
  *             properties:
  *               fullName:
  *                 type: string
- *               NRIC:
+ *               email:
  *                 type: string
+ *                 format: email
  *               password:
  *                 type: string
  *               image_url:
@@ -804,19 +937,24 @@ router.get('/staff', async (req, res) => {
 // CREATE staff
 router.post('/staff', async (req, res) => {
     try {
-        const { fullName, NRIC, password, image_url } = req.body;
+        const { fullName, email, password, image_url } = req.body;
+        
+        if (!fullName || !email || !password) {
+            return res.status(400).json({ success: false, error: 'fullName, email, and password are required' });
+        }
+        
         const connection = await pool.getConnection();
         
         // Hash the password
         const hashedPassword = await bcrypt.hash(password, 10);
         
         const [userResult] = await connection.query(
-            'INSERT INTO User (fullName, NRIC, role, image_url) VALUES (?, ?, ?, ?)',
-            [fullName, NRIC, 'staff', image_url]
+            'INSERT INTO User (fullName, role, image_url) VALUES (?, ?, ?)',
+            [fullName, 'staff', image_url]
         );
         
-        await connection.query('INSERT INTO Staff (userID, password) VALUES (?, ?)', 
-            [userResult.insertId, hashedPassword]);
+        await connection.query('INSERT INTO Staff (userID, email, password) VALUES (?, ?, ?)', 
+            [userResult.insertId, email, hashedPassword]);
         connection.release();
         
         res.status(201).json({ success: true, userID: userResult.insertId });
@@ -1655,505 +1793,6 @@ router.post('/volunteer-events', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// VOLUNTEER UNREGISTER FROM EVENT
-router.delete('/volunteer-events/:volunteerID/:eventID', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        await connection.query(
-            'DELETE FROM VolunteerEvent WHERE volunteerID = ? AND eventID = ?',
-            [req.params.volunteerID, req.params.eventID]
-        );
-        connection.release();
-        res.json({ success: true, message: 'Volunteer removed from event' });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// GET single user
-router.get('/users/:userID', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        const [user] = await connection.query('SELECT * FROM User WHERE userID = ?', [req.params.userID]);
-        connection.release();
-        res.json({ success: true, data: user[0] });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// CREATE user
-router.post('/users', async (req, res) => {
-    try {
-        const { fullName, NRIC, role, image_url } = req.body;
-        const connection = await pool.getConnection();
-        const [result] = await connection.query(
-            'INSERT INTO User (fullName, NRIC, role, image_url) VALUES (?, ?, ?, ?)',
-            [fullName, NRIC, role, image_url]
-        );
-        connection.release();
-        res.status(201).json({ success: true, userID: result.insertId });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// UPDATE user
-router.put('/users/:userID', async (req, res) => {
-    try {
-        const { fullName, NRIC, role, image_url } = req.body;
-        const connection = await pool.getConnection();
-        await connection.query(
-            'UPDATE User SET fullName = ?, NRIC = ?, role = ?, image_url = ? WHERE userID = ?',
-            [fullName, NRIC, role, image_url, req.params.userID]
-        );
-        connection.release();
-        res.json({ success: true, message: 'User updated' });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// DELETE user
-router.delete('/users/:userID', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        await connection.query('DELETE FROM User WHERE userID = ?', [req.params.userID]);
-        connection.release();
-        res.json({ success: true, message: 'User deleted' });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// ==================== AUTHENTICATION ====================
-
-// LOGIN - Staff authentication
-router.post('/login', async (req, res) => {
-    try {
-        const { NRIC, password } = req.body;
-        
-        if (!NRIC || !password) {
-            return res.status(400).json({ success: false, error: 'NRIC and password are required' });
-        }
-        
-        const connection = await pool.getConnection();
-        
-        // Get user and password hash from database
-        const [users] = await connection.query(
-            'SELECT u.userID, u.fullName, u.NRIC, u.role, u.image_url, s.password FROM User u JOIN Staff s ON u.userID = s.userID WHERE u.NRIC = ?',
-            [NRIC]
-        );
-        
-        connection.release();
-        
-        if (!users || users.length === 0) {
-            return res.status(401).json({ success: false, error: 'Invalid NRIC or password' });
-        }
-        
-        const user = users[0];
-        
-        // Compare provided password with hashed password
-        const isPasswordValid = await bcrypt.compare(password, user.password);
-        
-        if (!isPasswordValid) {
-            return res.status(401).json({ success: false, error: 'Invalid NRIC or password' });
-        }
-        
-        // Generate JWT token
-        const token = jwt.sign(
-            { 
-                userID: user.userID, 
-                NRIC: user.NRIC, 
-                role: user.role 
-            },
-            process.env.JWT_SECRET || 'your_secret_key_change_in_production',
-            { expiresIn: '24h' }
-        );
-        
-        // Return user info and token (exclude password)
-        res.json({ 
-            success: true, 
-            token,
-            data: {
-                userID: user.userID,
-                fullName: user.fullName,
-                NRIC: user.NRIC,
-                role: user.role,
-                image_url: user.image_url
-            }
-        });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// ==================== PARTICIPANT CRUD ====================
-
-// GET all participants
-router.get('/participants', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        const [participants] = await connection.query(
-            'SELECT u.*, p.created_at FROM Participant p JOIN User u ON p.userID = u.userID'
-        );
-        connection.release();
-        res.json({ success: true, data: participants });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// CREATE participant
-router.post('/participants', async (req, res) => {
-    try {
-        const { fullName, NRIC, image_url } = req.body;
-        const connection = await pool.getConnection();
-        
-        // Insert into User table
-        const [userResult] = await connection.query(
-            'INSERT INTO User (fullName, NRIC, role, image_url) VALUES (?, ?, ?, ?)',
-            [fullName, NRIC, 'participant', image_url]
-        );
-        
-        // Insert into Participant table
-        await connection.query('INSERT INTO Participant (userID) VALUES (?)', [userResult.insertId]);
-        connection.release();
-        
-        res.status(201).json({ success: true, userID: userResult.insertId });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// DELETE participant
-router.delete('/participants/:userID', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        await connection.query('DELETE FROM Participant WHERE userID = ?', [req.params.userID]);
-        connection.release();
-        res.json({ success: true, message: 'Participant deleted' });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// ==================== VOLUNTEERS CRUD ====================
-
-// GET all volunteers
-router.get('/volunteers', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        const [volunteers] = await connection.query(
-            'SELECT u.*, v.created_at FROM Volunteers v JOIN User u ON v.userID = u.userID'
-        );
-        connection.release();
-        res.json({ success: true, data: volunteers });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// CREATE volunteer
-router.post('/volunteers', async (req, res) => {
-    try {
-        const { fullName, NRIC, image_url } = req.body;
-        const connection = await pool.getConnection();
-        
-        const [userResult] = await connection.query(
-            'INSERT INTO User (fullName, NRIC, role, image_url) VALUES (?, ?, ?, ?)',
-            [fullName, NRIC, 'volunteer', image_url]
-        );
-        
-        await connection.query('INSERT INTO Volunteers (userID) VALUES (?)', [userResult.insertId]);
-        connection.release();
-        
-        res.status(201).json({ success: true, userID: userResult.insertId });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// DELETE volunteer
-router.delete('/volunteers/:userID', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        await connection.query('DELETE FROM Volunteers WHERE userID = ?', [req.params.userID]);
-        connection.release();
-        res.json({ success: true, message: 'Volunteer deleted' });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// ==================== STAFF CRUD ====================
-
-// GET all staff
-router.get('/staff', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        const [staff] = await connection.query(
-            'SELECT u.userID, u.fullName, u.NRIC, u.role, u.image_url, s.created_at FROM Staff s JOIN User u ON s.userID = u.userID'
-        );
-        connection.release();
-        res.json({ success: true, data: staff });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// CREATE staff
-router.post('/staff', async (req, res) => {
-    try {
-        const { fullName, NRIC, password, image_url } = req.body;
-        const connection = await pool.getConnection();
-        
-        // Hash the password
-        const hashedPassword = await bcrypt.hash(password, 10);
-        
-        const [userResult] = await connection.query(
-            'INSERT INTO User (fullName, NRIC, role, image_url) VALUES (?, ?, ?, ?)',
-            [fullName, NRIC, 'staff', image_url]
-        );
-        
-        await connection.query('INSERT INTO Staff (userID, password) VALUES (?, ?)', 
-            [userResult.insertId, hashedPassword]);
-        connection.release();
-        
-        res.status(201).json({ success: true, userID: userResult.insertId });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// UPDATE staff password
-router.put('/staff/:userID', async (req, res) => {
-    try {
-        const { password } = req.body;
-        const connection = await pool.getConnection();
-        
-        // Hash the password
-        const hashedPassword = await bcrypt.hash(password, 10);
-        
-        await connection.query('UPDATE Staff SET password = ? WHERE userID = ?', 
-            [hashedPassword, req.params.userID]);
-        connection.release();
-        res.json({ success: true, message: 'Staff updated' });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// DELETE staff
-router.delete('/staff/:userID', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        await connection.query('DELETE FROM Staff WHERE userID = ?', [req.params.userID]);
-        connection.release();
-        res.json({ success: true, message: 'Staff deleted' });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// ==================== EVENT CRUD ====================
-
-// GET all events
-router.get('/events', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        const [events] = await connection.query('SELECT * FROM Event ORDER BY datetime DESC');
-        connection.release();
-        res.json({ success: true, data: events });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// GET single event
-router.get('/events/:eventID', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        const [event] = await connection.query('SELECT * FROM Event WHERE eventID = ?', [req.params.eventID]);
-        connection.release();
-        res.json({ success: true, data: event[0] });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// CREATE event
-router.post('/events', verifyToken, async (req, res) => {
-    try {
-        const { eventName, eventDescription, disabled_friendly, datetime, location, additional_information } = req.body;
-        const created_by = req.user.userID;
-        
-        const connection = await pool.getConnection();
-        
-        // Check if user has staff role (already verified in token, but double-check)
-        const [user] = await connection.query('SELECT role FROM User WHERE userID = ?', [created_by]);
-        
-        if (!user || user.length === 0) {
-            connection.release();
-            return res.status(401).json({ success: false, error: 'User not found' });
-        }
-        
-        if (user[0].role !== 'staff') {
-            connection.release();
-            return res.status(403).json({ success: false, error: 'Only staff members can create events' });
-        }
-        
-        // Create event
-        const [result] = await connection.query(
-            'INSERT INTO Event (eventName, eventDescription, disabled_friendly, datetime, location, additional_information, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [eventName, eventDescription, disabled_friendly, datetime, location, additional_information, created_by]
-        );
-        connection.release();
-        res.status(201).json({ success: true, eventID: result.insertId });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// UPDATE event
-router.put('/events/:eventID', async (req, res) => {
-    try {
-        const { eventName, eventDescription, disabled_friendly, datetime, location, additional_information } = req.body;
-        const connection = await pool.getConnection();
-        await connection.query(
-            'UPDATE Event SET eventName = ?, eventDescription = ?, disabled_friendly = ?, datetime = ?, location = ?, additional_information = ? WHERE eventID = ?',
-            [eventName, eventDescription, disabled_friendly, datetime, location, additional_information, req.params.eventID]
-        );
-        connection.release();
-        res.json({ success: true, message: 'Event updated' });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// DELETE event
-router.delete('/events/:eventID', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        await connection.query('DELETE FROM Event WHERE eventID = ?', [req.params.eventID]);
-        connection.release();
-        res.json({ success: true, message: 'Event deleted' });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// ==================== PARTICIPANT EVENT CRUD ====================
-
-// GET participants for an event
-router.get('/events/:eventID/participants', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        const [participants] = await connection.query(
-            'SELECT u.*, pe.signed_at FROM ParticipantEvent pe JOIN User u ON pe.participantID = u.userID WHERE pe.eventID = ?',
-            [req.params.eventID]
-        );
-        connection.release();
-        res.json({ success: true, data: participants });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// GET events for a participant
-router.get('/participants/:participantID/events', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        const [events] = await connection.query(
-            'SELECT e.*, pe.signed_at FROM ParticipantEvent pe JOIN Event e ON pe.eventID = e.eventID WHERE pe.participantID = ?',
-            [req.params.participantID]
-        );
-        connection.release();
-        res.json({ success: true, data: events });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// PARTICIPANT SIGNS EVENT
-router.post('/participant-events', async (req, res) => {
-    try {
-        const { participantID, eventID } = req.body;
-        const connection = await pool.getConnection();
-        await connection.query(
-            'INSERT INTO ParticipantEvent (participantID, eventID) VALUES (?, ?)',
-            [participantID, eventID]
-        );
-        connection.release();
-        res.status(201).json({ success: true, message: 'Participant signed to event' });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// PARTICIPANT UNREGISTER FROM EVENT
-router.delete('/participant-events/:participantID/:eventID', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        await connection.query(
-            'DELETE FROM ParticipantEvent WHERE participantID = ? AND eventID = ?',
-            [req.params.participantID, req.params.eventID]
-        );
-        connection.release();
-        res.json({ success: true, message: 'Participant removed from event' });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// ==================== VOLUNTEER EVENT CRUD ====================
-
-// GET volunteers for an event
-router.get('/events/:eventID/volunteers', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        const [volunteers] = await connection.query(
-            'SELECT u.*, ve.signed_at FROM VolunteerEvent ve JOIN User u ON ve.volunteerID = u.userID WHERE ve.eventID = ?',
-            [req.params.eventID]
-        );
-        connection.release();
-        res.json({ success: true, data: volunteers });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// GET events for a volunteer
-router.get('/volunteers/:volunteerID/events', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        const [events] = await connection.query(
-            'SELECT e.*, ve.signed_at FROM VolunteerEvent ve JOIN Event e ON ve.eventID = e.eventID WHERE ve.volunteerID = ?',
-            [req.params.volunteerID]
-        );
-        connection.release();
-        res.json({ success: true, data: events });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// VOLUNTEER SIGNS EVENT
-router.post('/volunteer-events', async (req, res) => {
-    try {
-        const { volunteerID, eventID } = req.body;
-        const connection = await pool.getConnection();
-        await connection.query(
-            'INSERT INTO VolunteerEvent (volunteerID, eventID) VALUES (?, ?)',
-            [volunteerID, eventID]
-        );
-        connection.release();
-        res.status(201).json({ success: true, message: 'Volunteer signed to event' });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
 // VOLUNTEER UNREGISTER FROM EVENT
 router.delete('/volunteer-events/:volunteerID/:eventID', async (req, res) => {
     try {
