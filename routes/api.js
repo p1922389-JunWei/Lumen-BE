@@ -131,12 +131,9 @@ router.get('/users/:userID', async (req, res) => {
  *             type: object
  *             required:
  *               - fullName
- *               - NRIC
  *               - role
  *             properties:
  *               fullName:
- *                 type: string
- *               NRIC:
  *                 type: string
  *               role:
  *                 type: string
@@ -165,11 +162,11 @@ router.get('/users/:userID', async (req, res) => {
 // CREATE user
 router.post('/users', async (req, res) => {
     try {
-        const { fullName, NRIC, role, image_url } = req.body;
+        const { fullName, role, image_url } = req.body;
         const connection = await pool.getConnection();
         const [result] = await connection.query(
-            'INSERT INTO User (fullName, NRIC, role, image_url) VALUES (?, ?, ?, ?)',
-            [fullName, NRIC, role, image_url]
+            'INSERT INTO User (fullName, role, image_url) VALUES (?, ?, ?)',
+            [fullName, role, image_url]
         );
         connection.release();
         res.status(201).json({ success: true, userID: result.insertId });
@@ -202,8 +199,6 @@ router.post('/users', async (req, res) => {
  *             properties:
  *               fullName:
  *                 type: string
- *               NRIC:
- *                 type: string
  *               role:
  *                 type: string
  *                 enum: [participant, volunteer, staff]
@@ -231,11 +226,11 @@ router.post('/users', async (req, res) => {
 // UPDATE user
 router.put('/users/:userID', async (req, res) => {
     try {
-        const { fullName, NRIC, role, image_url } = req.body;
+        const { fullName, role, image_url } = req.body;
         const connection = await pool.getConnection();
         await connection.query(
-            'UPDATE User SET fullName = ?, NRIC = ?, role = ?, image_url = ? WHERE userID = ?',
-            [fullName, NRIC, role, image_url, req.params.userID]
+            'UPDATE User SET fullName = ?, role = ?, image_url = ? WHERE userID = ?',
+            [fullName, role, image_url, req.params.userID]
         );
         connection.release();
         res.json({ success: true, message: 'User updated' });
@@ -608,7 +603,7 @@ router.post('/participants', async (req, res) => {
         
         const connection = await pool.getConnection();
         
-        // Insert into User table (NRIC is now nullable)
+        // Insert into User table
         const [userResult] = await connection.query(
             'INSERT INTO User (fullName, role, image_url) VALUES (?, ?, ?)',
             [fullName, 'participant', image_url]
@@ -878,7 +873,7 @@ router.get('/staff', async (req, res) => {
     try {
         const connection = await pool.getConnection();
         const [staff] = await connection.query(
-            'SELECT u.userID, u.fullName, u.NRIC, u.role, u.image_url, s.created_at FROM Staff s JOIN User u ON s.userID = u.userID'
+            'SELECT u.userID, u.fullName, u.role, u.image_url, s.created_at FROM Staff s JOIN User u ON s.userID = u.userID'
         );
         connection.release();
         res.json({ success: true, data: staff });
