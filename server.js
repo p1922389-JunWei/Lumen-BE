@@ -1,5 +1,7 @@
 require('dotenv').config();
 const express = require('express');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpecs = require('./swagger');
 const { pool } = require('./db');
 const apiRoutes = require('./routes/api');
 
@@ -9,6 +11,9 @@ const port = 3001;
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Swagger UI
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
 
 // CORS
 app.use((req, res, next) => {
@@ -47,7 +52,7 @@ app.use((req, res) => {
 // Start server
 app.listen(port, () => {
     console.log(`🚀 Server running at http://localhost:${port}/`);
-    console.log(`📚 API Documentation:`);
+    console.log(`📚 API Documentation: http://localhost:${port}/api-docs`);
     console.log(`   Users: GET/POST/PUT/DELETE /api/users`);
     console.log(`   Participants: GET/POST/DELETE /api/participants`);
     console.log(`   Volunteers: GET/POST/DELETE /api/volunteers`);
