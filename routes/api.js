@@ -406,6 +406,178 @@ router.post('/login', async (req, res) => {
 
 /**
  * @swagger
+ * /api/participant/check-or-create:
+ *   post:
+ *     summary: Check or create participant
+ *     description: Check if participant exists with given credentials, create if not, then send OTP
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phoneNumber
+ *               - fullName
+ *               - birthdate
+ *             properties:
+ *               phoneNumber:
+ *                 type: string
+ *               fullName:
+ *                 type: string
+ *               birthdate:
+ *                 type: string
+ *                 format: date
+ *     responses:
+ *       200:
+ *         description: OTP sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 isNewUser:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       400:
+ *         description: Missing required fields
+ *       500:
+ *         description: Server error
+ */
+// CHECK OR CREATE participant and send OTP
+router.post('/participant/check-or-create', async (req, res) => {
+    try {
+        const { phoneNumber, fullName, birthdate } = req.body;
+        
+        if (!phoneNumber || !fullName || !birthdate) {
+            return res.status(400).json({ success: false, error: 'Phone number, full name, and birthdate are required' });
+        }
+        
+        const connection = await pool.getConnection();
+        
+        // Step 1: Check if fullName exists in User table
+        let [existingUsers] = await connection.query(
+            `SELECT userID, fullName, role, image_url FROM User WHERE fullName = ?`,
+            [fullName]
+        );
+        
+        let isNewUser = false;
+        let user;
+        
+        if (!existingUsers || existingUsers.length === 0) {
+            // User doesn't exist - create new User and Participant
+            isNewUser = true;
+            
+            try {
+                // Create User first
+                const [userResult] = await connection.query(
+                    'INSERT INTO User (fullName, role, image_url) VALUES (?, ?, ?)',
+                    [fullName, 'participant', '']
+                );
+                
+                const newUserID = userResult.insertId;
+                console.log('Created new User with ID:', newUserID);
+                
+                // Then create Participant with the new userID
+                const [participantResult] = await connection.query(
+                    'INSERT INTO Participant (userID, phoneNumber, birthdate, full_name) VALUES (?, ?, ?, ?)',
+                    [newUserID, phoneNumber, birthdate, fullName]
+                );
+                console.log('Created new Participant:', participantResult);
+                
+                user = {
+                    userID: newUserID,
+                    fullName: fullName,
+                    phoneNumber: phoneNumber,
+                    birthdate: birthdate,
+                    role: 'participant'
+                };
+            } catch (insertError) {
+                connection.release();
+                console.error('Error creating user/participant:', insertError);
+                return res.status(500).json({ success: false, error: 'Failed to create account: ' + insertError.message });
+            }
+        } else {
+            // User exists - check if they have a Participant entry
+            const existingUser = existingUsers[0];
+            
+            // Check if Participant record exists for this user
+            let [existingParticipants] = await connection.query(
+                `SELECT userID, phoneNumber, birthdate FROM Participant WHERE userID = ?`,
+                [existingUser.userID]
+            );
+            
+            if (!existingParticipants || existingParticipants.length === 0) {
+                // User exists but no Participant entry - create it
+                await connection.query(
+                    'INSERT INTO Participant (userID, phoneNumber, birthdate, full_name) VALUES (?, ?, ?, ?)',
+                    [existingUser.userID, phoneNumber, birthdate, existingUser.fullName]
+                );
+                
+                user = {
+                    userID: existingUser.userID,
+                    fullName: existingUser.fullName,
+                    phoneNumber: phoneNumber,
+                    birthdate: birthdate,
+                    role: existingUser.role
+                };
+            } else {
+                // Participant exists - verify phone and birthdate match
+                const existing = existingParticipants[0];
+                
+                // Normalize dates for comparison (handle timezone issues)
+                // Extract just the date part without timezone conversion
+                const existingDate = existing.birthdate;
+                const existingBirthdate = existingDate ? 
+                    `${existingDate.getFullYear()}-${String(existingDate.getMonth() + 1).padStart(2, '0')}-${String(existingDate.getDate()).padStart(2, '0')}` : null;
+                
+                // Input birthdate comes as YYYY-MM-DD string from frontend
+                const inputBirthdate = birthdate.split('T')[0]; // In case it has time component
+                
+                console.log('Comparing - Stored:', existingBirthdate, '| Input:', inputBirthdate);
+                console.log('Comparing - Stored phone:', existing.phoneNumber, '| Input phone:', phoneNumber);
+                
+                if (existing.phoneNumber !== phoneNumber || existingBirthdate !== inputBirthdate) {
+                    connection.release();
+                    return res.status(401).json({ 
+                        success: false, 
+                        error: 'Credentials do not match. Please check your phone number and birthdate.' 
+                    });
+                }
+                
+                user = {
+                    userID: existingUser.userID,
+                    fullName: existingUser.fullName,
+                    phoneNumber: existing.phoneNumber,
+                    birthdate: existing.birthdate,
+                    role: existingUser.role
+                };
+            }
+        }
+        
+        connection.release();
+        
+        // In production, send actual OTP via SMS here
+        // For demo, we'll just return success
+        
+        res.json({ 
+            success: true, 
+            isNewUser,
+            message: isNewUser ? 'Account created. OTP sent!' : 'OTP sent!',
+            userID: user.userID  // Used for OTP verification
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * @swagger
  * /api/login-otp:
  *   post:
  *     summary: Login with OTP
@@ -458,37 +630,22 @@ router.post('/login-otp', async (req, res) => {
         
         const connection = await pool.getConnection();
         
-        // Find or create participant with this phone number
+        // Find participant with this phone number (should exist from check-or-create)
         let [participants] = await connection.query(
-            'SELECT u.userID, u.fullName, u.role, u.image_url, p.phoneNumber FROM User u JOIN Participant p ON u.userID = p.userID WHERE p.phoneNumber = ?',
+            `SELECT u.userID, u.fullName, u.role, u.image_url, p.phoneNumber, p.birthdate 
+             FROM User u 
+             JOIN Participant p ON u.userID = p.userID 
+             WHERE p.phoneNumber = ?`,
             [phone]
         );
         
-        let user;
+        connection.release();
+        
         if (!participants || participants.length === 0) {
-            // Create new participant if not found
-            const fullName = 'Participant ' + phone;
-            const [userResult] = await connection.query(
-                'INSERT INTO User (fullName, role, image_url) VALUES (?, ?, ?)',
-                [fullName, 'participant', '']
-            );
-            
-            const [participantResult] = await connection.query(
-                'INSERT INTO Participant (userID, phoneNumber, birthdate) VALUES (?, ?, ?)',
-                [userResult.insertId, phone, '2000-01-01']
-            );
-            
-            user = {
-                userID: userResult.insertId,
-                fullName: fullName,
-                phone: phone,
-                role: 'participant'
-            };
-        } else {
-            user = participants[0];
+            return res.status(401).json({ success: false, error: 'Participant not found. Please register first.' });
         }
         
-        connection.release();
+        const user = participants[0];
         
         // Generate JWT token
         const token = jwt.sign(
