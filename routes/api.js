@@ -28,6 +28,35 @@ const verifyToken = (req, res, next) => {
 
 // ==================== USER CRUD ====================
 
+/**
+ * @swagger
+ * /api/users:
+ *   get:
+ *     summary: Get all users
+ *     description: Retrieve a list of all users in the system
+ *     tags:
+ *       - Users
+ *     responses:
+ *       200:
+ *         description: List of users retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/User'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // GET all users
 router.get('/users', async (req, res) => {
     try {
@@ -40,6 +69,40 @@ router.get('/users', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/users/{userID}:
+ *   get:
+ *     summary: Get a single user
+ *     description: Retrieve details of a specific user by ID
+ *     tags:
+ *       - Users
+ *     parameters:
+ *       - in: path
+ *         name: userID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The user ID
+ *     responses:
+ *       200:
+ *         description: User retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   $ref: '#/components/schemas/User'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // GET single user
 router.get('/users/:userID', async (req, res) => {
     try {
@@ -52,14 +115,58 @@ router.get('/users/:userID', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/users:
+ *   post:
+ *     summary: Create a new user
+ *     description: Create a new user with basic information
+ *     tags:
+ *       - Users
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - fullName
+ *               - role
+ *             properties:
+ *               fullName:
+ *                 type: string
+ *               role:
+ *                 type: string
+ *                 enum: [participant, volunteer, staff]
+ *               image_url:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: User created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 userID:
+ *                   type: integer
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // CREATE user
 router.post('/users', async (req, res) => {
     try {
-        const { fullName, NRIC, role, image_url } = req.body;
+        const { fullName, role, image_url } = req.body;
         const connection = await pool.getConnection();
         const [result] = await connection.query(
-            'INSERT INTO User (fullName, NRIC, role, image_url) VALUES (?, ?, ?, ?)',
-            [fullName, NRIC, role, image_url]
+            'INSERT INTO User (fullName, role, image_url) VALUES (?, ?, ?)',
+            [fullName, role, image_url]
         );
         connection.release();
         res.status(201).json({ success: true, userID: result.insertId });
@@ -68,14 +175,62 @@ router.post('/users', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/users/{userID}:
+ *   put:
+ *     summary: Update a user
+ *     description: Update user information
+ *     tags:
+ *       - Users
+ *     parameters:
+ *       - in: path
+ *         name: userID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The user ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               fullName:
+ *                 type: string
+ *               role:
+ *                 type: string
+ *                 enum: [participant, volunteer, staff]
+ *               image_url:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: User updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // UPDATE user
 router.put('/users/:userID', async (req, res) => {
     try {
-        const { fullName, NRIC, role, image_url } = req.body;
+        const { fullName, role, image_url } = req.body;
         const connection = await pool.getConnection();
         await connection.query(
-            'UPDATE User SET fullName = ?, NRIC = ?, role = ?, image_url = ? WHERE userID = ?',
-            [fullName, NRIC, role, image_url, req.params.userID]
+            'UPDATE User SET fullName = ?, role = ?, image_url = ? WHERE userID = ?',
+            [fullName, role, image_url, req.params.userID]
         );
         connection.release();
         res.json({ success: true, message: 'User updated' });
@@ -84,6 +239,40 @@ router.put('/users/:userID', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/users/{userID}:
+ *   delete:
+ *     summary: Delete a user
+ *     description: Remove a user from the system
+ *     tags:
+ *       - Users
+ *     parameters:
+ *       - in: path
+ *         name: userID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The user ID
+ *     responses:
+ *       200:
+ *         description: User deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // DELETE user
 router.delete('/users/:userID', async (req, res) => {
     try {
@@ -98,27 +287,84 @@ router.delete('/users/:userID', async (req, res) => {
 
 // ==================== AUTHENTICATION ====================
 
-// LOGIN - Staff authentication
+/**
+ * @swagger
+ * /api/login:
+ *   post:
+ *     summary: Login staff/volunteer
+ *     description: Authenticate a staff member or volunteer with email and password to receive a JWT token
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse'
+ *       400:
+ *         description: Missing required fields
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Invalid credentials
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// LOGIN - Staff/Volunteer authentication with email and password
 router.post('/login', async (req, res) => {
     try {
-        const { NRIC, password } = req.body;
+        const { email, password } = req.body;
         
-        if (!NRIC || !password) {
-            return res.status(400).json({ success: false, error: 'NRIC and password are required' });
+        if (!email || !password) {
+            return res.status(400).json({ success: false, error: 'Email and password are required' });
         }
         
         const connection = await pool.getConnection();
         
-        // Get user and password hash from database
-        const [users] = await connection.query(
-            'SELECT u.userID, u.fullName, u.NRIC, u.role, u.image_url, s.password FROM User u JOIN Staff s ON u.userID = s.userID WHERE u.NRIC = ?',
-            [NRIC]
+        // Try to find in Staff table first
+        let [users] = await connection.query(
+            'SELECT u.userID, u.fullName, u.role, u.image_url, s.email, s.password FROM User u JOIN Staff s ON u.userID = s.userID WHERE s.email = ?',
+            [email]
         );
+        
+        // If not found in Staff, try Volunteers table
+        if (!users || users.length === 0) {
+            [users] = await connection.query(
+                'SELECT u.userID, u.fullName, u.role, u.image_url, v.email, v.password FROM User u JOIN Volunteers v ON u.userID = v.userID WHERE v.email = ?',
+                [email]
+            );
+        }
         
         connection.release();
         
         if (!users || users.length === 0) {
-            return res.status(401).json({ success: false, error: 'Invalid NRIC or password' });
+            return res.status(401).json({ success: false, error: 'Invalid email or password' });
         }
         
         const user = users[0];
@@ -127,14 +373,14 @@ router.post('/login', async (req, res) => {
         const isPasswordValid = await bcrypt.compare(password, user.password);
         
         if (!isPasswordValid) {
-            return res.status(401).json({ success: false, error: 'Invalid NRIC or password' });
+            return res.status(401).json({ success: false, error: 'Invalid email or password' });
         }
         
         // Generate JWT token
         const token = jwt.sign(
             { 
                 userID: user.userID, 
-                NRIC: user.NRIC, 
+                email: user.email, 
                 role: user.role 
             },
             process.env.JWT_SECRET || 'your_secret_key_change_in_production',
@@ -148,7 +394,7 @@ router.post('/login', async (req, res) => {
             data: {
                 userID: user.userID,
                 fullName: user.fullName,
-                NRIC: user.NRIC,
+                email: user.email,
                 role: user.role,
                 image_url: user.image_url
             }
@@ -158,14 +404,248 @@ router.post('/login', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/login-otp:
+ *   post:
+ *     summary: Login with OTP
+ *     description: Authenticate a participant with phone number and OTP
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phone
+ *               - otp
+ *             properties:
+ *               phone:
+ *                 type: string
+ *               otp:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse'
+ *       401:
+ *         description: Invalid OTP
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ */
+// LOGIN with OTP - Participant authentication
+router.post('/login-otp', async (req, res) => {
+    try {
+        const { phone, otp } = req.body;
+        
+        if (!phone || !otp) {
+            return res.status(400).json({ success: false, error: 'Phone and OTP are required' });
+        }
+        
+        // Demo OTP validation - accept 123456
+        if (otp !== '123456') {
+            return res.status(401).json({ success: false, error: 'Invalid OTP' });
+        }
+        
+        const connection = await pool.getConnection();
+        
+        // Find or create participant with this phone number
+        let [participants] = await connection.query(
+            'SELECT u.userID, u.fullName, u.role, u.image_url, p.phoneNumber FROM User u JOIN Participant p ON u.userID = p.userID WHERE p.phoneNumber = ?',
+            [phone]
+        );
+        
+        let user;
+        if (!participants || participants.length === 0) {
+            // Create new participant if not found
+            const fullName = 'Participant ' + phone;
+            const [userResult] = await connection.query(
+                'INSERT INTO User (fullName, role, image_url) VALUES (?, ?, ?)',
+                [fullName, 'participant', '']
+            );
+            
+            const [participantResult] = await connection.query(
+                'INSERT INTO Participant (userID, phoneNumber, birthdate) VALUES (?, ?, ?)',
+                [userResult.insertId, phone, '2000-01-01']
+            );
+            
+            user = {
+                userID: userResult.insertId,
+                fullName: fullName,
+                phone: phone,
+                role: 'participant'
+            };
+        } else {
+            user = participants[0];
+        }
+        
+        connection.release();
+        
+        // Generate JWT token
+        const token = jwt.sign(
+            { userID: user.userID, fullName: user.fullName, role: user.role },
+            process.env.JWT_SECRET || 'your_secret_key_change_in_production',
+            { expiresIn: '7d' }
+        );
+        
+        // Return user info and token
+        res.json({ 
+            success: true, 
+            token,
+            data: {
+                userID: user.userID,
+                fullName: user.fullName,
+                phone: user.phone || phone,
+                role: user.role || 'participant'
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * @swagger
+ * /api/login/participant:
+ *   post:
+ *     summary: Login participant
+ *     description: Authenticate a participant with phone number, birthdate and full name
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phoneNumber
+ *               - birthdate
+ *               - fullName
+ *             properties:
+ *               phoneNumber:
+ *                 type: string
+ *               birthdate:
+ *                 type: string
+ *                 format: date
+ *               fullName:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse'
+ *       400:
+ *         description: Missing required fields
+ *       401:
+ *         description: Invalid credentials
+ *       500:
+ *         description: Server error
+ */
+// LOGIN - Participant authentication with phone + birthdate + name
+router.post('/login/participant', async (req, res) => {
+    try {
+        const { phoneNumber, birthdate, fullName } = req.body;
+        
+        if (!phoneNumber || !birthdate || !fullName) {
+            return res.status(400).json({ success: false, error: 'Phone number, birthdate, and full name are required' });
+        }
+        
+        const connection = await pool.getConnection();
+        
+        // Find participant by phone number and verify birthdate and name
+        const [participants] = await connection.query(
+            `SELECT u.userID, u.fullName, u.role, u.image_url, p.phoneNumber, p.birthdate 
+             FROM User u 
+             JOIN Participant p ON u.userID = p.userID 
+             WHERE p.phoneNumber = ? AND p.birthdate = ? AND u.fullName = ?`,
+            [phoneNumber, birthdate, fullName]
+        );
+        
+        connection.release();
+        
+        if (!participants || participants.length === 0) {
+            return res.status(401).json({ success: false, error: 'Invalid credentials. Please check your phone number, birthdate, and name.' });
+        }
+        
+        const participant = participants[0];
+        
+        // Generate JWT token
+        const token = jwt.sign(
+            { 
+                userID: participant.userID, 
+                phoneNumber: participant.phoneNumber, 
+                role: participant.role 
+            },
+            process.env.JWT_SECRET || 'your_secret_key_change_in_production',
+            { expiresIn: '24h' }
+        );
+        
+        // Return participant info and token
+        res.json({ 
+            success: true, 
+            token,
+            data: {
+                userID: participant.userID,
+                fullName: participant.fullName,
+                phoneNumber: participant.phoneNumber,
+                role: participant.role,
+                image_url: participant.image_url
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // ==================== PARTICIPANT CRUD ====================
 
+/**
+ * @swagger
+ * /api/participants:
+ *   get:
+ *     summary: Get all participants
+ *     description: Retrieve a list of all participants
+ *     tags:
+ *       - Participants
+ *     responses:
+ *       200:
+ *         description: List of participants retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/User'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // GET all participants
 router.get('/participants', async (req, res) => {
     try {
         const connection = await pool.getConnection();
         const [participants] = await connection.query(
-            'SELECT u.*, p.created_at FROM Participant p JOIN User u ON p.userID = u.userID'
+            'SELECT u.userID, u.fullName, u.role, u.image_url, p.phoneNumber, p.birthdate, p.created_at FROM Participant p JOIN User u ON p.userID = u.userID'
         );
         connection.release();
         res.json({ success: true, data: participants });
@@ -174,20 +654,75 @@ router.get('/participants', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/participants:
+ *   post:
+ *     summary: Create a new participant
+ *     description: Create a new participant in the system
+ *     tags:
+ *       - Participants
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - fullName
+ *               - phoneNumber
+ *               - birthdate
+ *             properties:
+ *               fullName:
+ *                 type: string
+ *               phoneNumber:
+ *                 type: string
+ *               birthdate:
+ *                 type: string
+ *                 format: date
+ *               image_url:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Participant created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 userID:
+ *                   type: integer
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // CREATE participant
 router.post('/participants', async (req, res) => {
     try {
-        const { fullName, NRIC, image_url } = req.body;
+        const { fullName, phoneNumber, birthdate, image_url } = req.body;
+        
+        if (!fullName || !phoneNumber || !birthdate) {
+            return res.status(400).json({ success: false, error: 'fullName, phoneNumber, and birthdate are required' });
+        }
+        
         const connection = await pool.getConnection();
         
         // Insert into User table
         const [userResult] = await connection.query(
-            'INSERT INTO User (fullName, NRIC, role, image_url) VALUES (?, ?, ?, ?)',
-            [fullName, NRIC, 'participant', image_url]
+            'INSERT INTO User (fullName, role, image_url) VALUES (?, ?, ?)',
+            [fullName, 'participant', image_url]
         );
         
-        // Insert into Participant table
-        await connection.query('INSERT INTO Participant (userID) VALUES (?)', [userResult.insertId]);
+        // Insert into Participant table with phoneNumber and birthdate
+        await connection.query(
+            'INSERT INTO Participant (userID, phoneNumber, birthdate) VALUES (?, ?, ?)', 
+            [userResult.insertId, phoneNumber, birthdate]
+        );
         connection.release();
         
         res.status(201).json({ success: true, userID: userResult.insertId });
@@ -196,6 +731,40 @@ router.post('/participants', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/participants/{userID}:
+ *   delete:
+ *     summary: Delete a participant
+ *     description: Remove a participant from the system
+ *     tags:
+ *       - Participants
+ *     parameters:
+ *       - in: path
+ *         name: userID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The participant user ID
+ *     responses:
+ *       200:
+ *         description: Participant deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // DELETE participant
 router.delete('/participants/:userID', async (req, res) => {
     try {
@@ -210,6 +779,35 @@ router.delete('/participants/:userID', async (req, res) => {
 
 // ==================== VOLUNTEERS CRUD ====================
 
+/**
+ * @swagger
+ * /api/volunteers:
+ *   get:
+ *     summary: Get all volunteers
+ *     description: Retrieve a list of all volunteers
+ *     tags:
+ *       - Volunteers
+ *     responses:
+ *       200:
+ *         description: List of volunteers retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/User'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // GET all volunteers
 router.get('/volunteers', async (req, res) => {
     try {
@@ -224,18 +822,76 @@ router.get('/volunteers', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/volunteers:
+ *   post:
+ *     summary: Create a new volunteer
+ *     description: Create a new volunteer with email and password
+ *     tags:
+ *       - Volunteers
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - fullName
+ *               - email
+ *               - password
+ *             properties:
+ *               fullName:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               password:
+ *                 type: string
+ *               image_url:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Volunteer created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 userID:
+ *                   type: integer
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // CREATE volunteer
 router.post('/volunteers', async (req, res) => {
     try {
-        const { fullName, NRIC, image_url } = req.body;
+        const { fullName, email, password, image_url } = req.body;
+        
+        if (!fullName || !email || !password) {
+            return res.status(400).json({ success: false, error: 'fullName, email, and password are required' });
+        }
+        
         const connection = await pool.getConnection();
         
+        // Hash the password
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
         const [userResult] = await connection.query(
-            'INSERT INTO User (fullName, NRIC, role, image_url) VALUES (?, ?, ?, ?)',
-            [fullName, NRIC, 'volunteer', image_url]
+            'INSERT INTO User (fullName, role, image_url) VALUES (?, ?, ?)',
+            [fullName, 'volunteer', image_url]
         );
         
-        await connection.query('INSERT INTO Volunteers (userID) VALUES (?)', [userResult.insertId]);
+        await connection.query(
+            'INSERT INTO Volunteers (userID, email, password) VALUES (?, ?, ?)', 
+            [userResult.insertId, email, hashedPassword]
+        );
         connection.release();
         
         res.status(201).json({ success: true, userID: userResult.insertId });
@@ -244,6 +900,40 @@ router.post('/volunteers', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/volunteers/{userID}:
+ *   delete:
+ *     summary: Delete a volunteer
+ *     description: Remove a volunteer from the system
+ *     tags:
+ *       - Volunteers
+ *     parameters:
+ *       - in: path
+ *         name: userID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The volunteer user ID
+ *     responses:
+ *       200:
+ *         description: Volunteer deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // DELETE volunteer
 router.delete('/volunteers/:userID', async (req, res) => {
     try {
@@ -258,12 +948,41 @@ router.delete('/volunteers/:userID', async (req, res) => {
 
 // ==================== STAFF CRUD ====================
 
+/**
+ * @swagger
+ * /api/staff:
+ *   get:
+ *     summary: Get all staff members
+ *     description: Retrieve a list of all staff members
+ *     tags:
+ *       - Staff
+ *     responses:
+ *       200:
+ *         description: List of staff members retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/User'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // GET all staff
 router.get('/staff', async (req, res) => {
     try {
         const connection = await pool.getConnection();
         const [staff] = await connection.query(
-            'SELECT u.userID, u.fullName, u.NRIC, u.role, u.image_url, s.created_at FROM Staff s JOIN User u ON s.userID = u.userID'
+            'SELECT u.userID, u.fullName, u.role, u.image_url, s.created_at FROM Staff s JOIN User u ON s.userID = u.userID'
         );
         connection.release();
         res.json({ success: true, data: staff });
@@ -272,22 +991,74 @@ router.get('/staff', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/staff:
+ *   post:
+ *     summary: Create a new staff member
+ *     description: Create a new staff member with email and password
+ *     tags:
+ *       - Staff
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - fullName
+ *               - email
+ *               - password
+ *             properties:
+ *               fullName:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               password:
+ *                 type: string
+ *               image_url:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Staff member created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 userID:
+ *                   type: integer
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // CREATE staff
 router.post('/staff', async (req, res) => {
     try {
-        const { fullName, NRIC, password, image_url } = req.body;
+        const { fullName, email, password, image_url } = req.body;
+        
+        if (!fullName || !email || !password) {
+            return res.status(400).json({ success: false, error: 'fullName, email, and password are required' });
+        }
+        
         const connection = await pool.getConnection();
         
         // Hash the password
         const hashedPassword = await bcrypt.hash(password, 10);
         
         const [userResult] = await connection.query(
-            'INSERT INTO User (fullName, NRIC, role, image_url) VALUES (?, ?, ?, ?)',
-            [fullName, NRIC, 'staff', image_url]
+            'INSERT INTO User (fullName, role, image_url) VALUES (?, ?, ?)',
+            [fullName, 'staff', image_url]
         );
         
-        await connection.query('INSERT INTO Staff (userID, password) VALUES (?, ?)', 
-            [userResult.insertId, hashedPassword]);
+        await connection.query('INSERT INTO Staff (userID, email, password) VALUES (?, ?, ?)', 
+            [userResult.insertId, email, hashedPassword]);
         connection.release();
         
         res.status(201).json({ success: true, userID: userResult.insertId });
@@ -296,6 +1067,51 @@ router.post('/staff', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/staff/{userID}:
+ *   put:
+ *     summary: Update staff member password
+ *     description: Update the password of a staff member
+ *     tags:
+ *       - Staff
+ *     parameters:
+ *       - in: path
+ *         name: userID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The staff member user ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - password
+ *             properties:
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Staff member updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // UPDATE staff password
 router.put('/staff/:userID', async (req, res) => {
     try {
@@ -314,6 +1130,40 @@ router.put('/staff/:userID', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/staff/{userID}:
+ *   delete:
+ *     summary: Delete a staff member
+ *     description: Remove a staff member from the system
+ *     tags:
+ *       - Staff
+ *     parameters:
+ *       - in: path
+ *         name: userID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The staff member user ID
+ *     responses:
+ *       200:
+ *         description: Staff member deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // DELETE staff
 router.delete('/staff/:userID', async (req, res) => {
     try {
@@ -328,6 +1178,36 @@ router.delete('/staff/:userID', async (req, res) => {
 
 // ==================== EVENT CRUD ====================
 
+/**
+ * @swagger
+ * /api/events:
+ *   get:
+ *     summary: Get all events
+ *     description: Retrieve a list of all events sorted by date
+ *     tags:
+ *       - Events
+ *     responses:
+ *       200:
+ *         description: List of events retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Event'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// GET all events
 // GET all events with registration counts
 router.get('/events', async (req, res) => {
     try {
@@ -350,6 +1230,41 @@ router.get('/events', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/events/{eventID}:
+ *   get:
+ *     summary: Get a single event
+ *     description: Retrieve details of a specific event by ID
+ *     tags:
+ *       - Events
+ *     parameters:
+ *       - in: path
+ *         name: eventID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The event ID
+ *     responses:
+ *       200:
+ *         description: Event retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   $ref: '#/components/schemas/Event'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// GET single event
 // GET single event with registration counts and lists
 router.get('/events/:eventID', async (req, res) => {
     try {
@@ -399,6 +1314,72 @@ router.get('/events/:eventID', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/events:
+ *   post:
+ *     summary: Create a new event
+ *     description: Create a new event (staff only)
+ *     tags:
+ *       - Events
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - eventName
+ *               - eventDescription
+ *               - datetime
+ *               - location
+ *             properties:
+ *               eventName:
+ *                 type: string
+ *               eventDescription:
+ *                 type: string
+ *               disabled_friendly:
+ *                 type: boolean
+ *               datetime:
+ *                 type: string
+ *                 format: date-time
+ *               location:
+ *                 type: string
+ *               additional_information:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Event created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 eventID:
+ *                   type: integer
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - only staff can create events
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // CREATE event
 router.post('/events', verifyToken, async (req, res) => {
     try {
@@ -432,6 +1413,60 @@ router.post('/events', verifyToken, async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/events/{eventID}:
+ *   put:
+ *     summary: Update an event
+ *     description: Update event information
+ *     tags:
+ *       - Events
+ *     parameters:
+ *       - in: path
+ *         name: eventID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The event ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               eventName:
+ *                 type: string
+ *               eventDescription:
+ *                 type: string
+ *               disabled_friendly:
+ *                 type: boolean
+ *               datetime:
+ *                 type: string
+ *                 format: date-time
+ *               location:
+ *                 type: string
+ *               additional_information:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Event updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // UPDATE event
 router.put('/events/:eventID', async (req, res) => {
     try {
@@ -448,6 +1483,40 @@ router.put('/events/:eventID', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/events/{eventID}:
+ *   delete:
+ *     summary: Delete an event
+ *     description: Remove an event from the system
+ *     tags:
+ *       - Events
+ *     parameters:
+ *       - in: path
+ *         name: eventID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The event ID
+ *     responses:
+ *       200:
+ *         description: Event deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // DELETE event
 router.delete('/events/:eventID', async (req, res) => {
     try {
@@ -462,6 +1531,42 @@ router.delete('/events/:eventID', async (req, res) => {
 
 // ==================== PARTICIPANT EVENT CRUD ====================
 
+/**
+ * @swagger
+ * /api/events/{eventID}/participants:
+ *   get:
+ *     summary: Get participants for an event
+ *     description: Retrieve all participants registered for a specific event
+ *     tags:
+ *       - ParticipantEvents
+ *     parameters:
+ *       - in: path
+ *         name: eventID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The event ID
+ *     responses:
+ *       200:
+ *         description: List of participants retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/User'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // GET participants for an event
 router.get('/events/:eventID/participants', async (req, res) => {
     try {
@@ -477,6 +1582,42 @@ router.get('/events/:eventID/participants', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/participants/{participantID}/events:
+ *   get:
+ *     summary: Get events for a participant
+ *     description: Retrieve all events a participant is registered for
+ *     tags:
+ *       - ParticipantEvents
+ *     parameters:
+ *       - in: path
+ *         name: participantID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The participant ID
+ *     responses:
+ *       200:
+ *         description: List of events retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Event'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // GET events for a participant
 router.get('/participants/:participantID/events', async (req, res) => {
     try {
@@ -492,6 +1633,47 @@ router.get('/participants/:participantID/events', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/participant-events:
+ *   post:
+ *     summary: Register participant to event
+ *     description: Sign a participant up for an event
+ *     tags:
+ *       - ParticipantEvents
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - participantID
+ *               - eventID
+ *             properties:
+ *               participantID:
+ *                 type: integer
+ *               eventID:
+ *                 type: integer
+ *     responses:
+ *       201:
+ *         description: Participant registered to event successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // PARTICIPANT SIGNS EVENT
 router.post('/participant-events', async (req, res) => {
     try {
@@ -541,6 +1723,46 @@ router.post('/participant-events', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/participant-events/{participantID}/{eventID}:
+ *   delete:
+ *     summary: Unregister participant from event
+ *     description: Remove a participant from an event
+ *     tags:
+ *       - ParticipantEvents
+ *     parameters:
+ *       - in: path
+ *         name: participantID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The participant ID
+ *       - in: path
+ *         name: eventID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The event ID
+ *     responses:
+ *       200:
+ *         description: Participant removed from event successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // PARTICIPANT UNREGISTER FROM EVENT
 router.delete('/participant-events/:participantID/:eventID', async (req, res) => {
     try {
@@ -558,6 +1780,42 @@ router.delete('/participant-events/:participantID/:eventID', async (req, res) =>
 
 // ==================== VOLUNTEER EVENT CRUD ====================
 
+/**
+ * @swagger
+ * /api/events/{eventID}/volunteers:
+ *   get:
+ *     summary: Get volunteers for an event
+ *     description: Retrieve all volunteers registered for a specific event
+ *     tags:
+ *       - VolunteerEvents
+ *     parameters:
+ *       - in: path
+ *         name: eventID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The event ID
+ *     responses:
+ *       200:
+ *         description: List of volunteers retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/User'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // GET volunteers for an event
 router.get('/events/:eventID/volunteers', async (req, res) => {
     try 
@@ -606,6 +1864,42 @@ router.get('/events/:eventID/volunteers', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/volunteers/{volunteerID}/events:
+ *   get:
+ *     summary: Get events for a volunteer
+ *     description: Retrieve all events a volunteer is registered for
+ *     tags:
+ *       - VolunteerEvents
+ *     parameters:
+ *       - in: path
+ *         name: volunteerID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The volunteer ID
+ *     responses:
+ *       200:
+ *         description: List of events retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Event'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // GET events for a volunteer
 router.get('/volunteers/:volunteerID/events', async (req, res) => {
     try {
@@ -621,6 +1915,47 @@ router.get('/volunteers/:volunteerID/events', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/volunteer-events:
+ *   post:
+ *     summary: Register volunteer to event
+ *     description: Sign a volunteer up for an event
+ *     tags:
+ *       - VolunteerEvents
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - volunteerID
+ *               - eventID
+ *             properties:
+ *               volunteerID:
+ *                 type: integer
+ *               eventID:
+ *                 type: integer
+ *     responses:
+ *       201:
+ *         description: Volunteer registered to event successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // VOLUNTEER SIGNS EVENT
 router.post('/volunteer-events', async (req, res) => {
     try {
@@ -637,6 +1972,46 @@ router.post('/volunteer-events', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/volunteer-events/{volunteerID}/{eventID}:
+ *   delete:
+ *     summary: Unregister volunteer from event
+ *     description: Remove a volunteer from an event
+ *     tags:
+ *       - VolunteerEvents
+ *     parameters:
+ *       - in: path
+ *         name: volunteerID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The volunteer ID
+ *       - in: path
+ *         name: eventID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The event ID
+ *     responses:
+ *       200:
+ *         description: Volunteer removed from event successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // VOLUNTEER UNREGISTER FROM EVENT
 router.delete('/volunteer-events/:volunteerID/:eventID', async (req, res) => {
     try {
