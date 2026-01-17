@@ -1208,10 +1208,21 @@ router.delete('/staff/:userID', async (req, res) => {
  *               $ref: '#/components/schemas/Error'
  */
 // GET all events
+// GET all events with registration counts
 router.get('/events', async (req, res) => {
     try {
         const connection = await pool.getConnection();
-        const [events] = await connection.query('SELECT * FROM Event ORDER BY datetime DESC');
+        const [events] = await connection.query(`
+            SELECT 
+                e.*,
+                COUNT(DISTINCT pe.participantID) as registered_participants,
+                COUNT(DISTINCT ve.volunteerID) as registered_volunteers
+            FROM Event e
+            LEFT JOIN ParticipantEvent pe ON e.eventID = pe.eventID
+            LEFT JOIN VolunteerEvent ve ON e.eventID = ve.eventID
+            GROUP BY e.eventID
+            ORDER BY e.datetime DESC
+        `);
         connection.release();
         res.json({ success: true, data: events });
     } catch (error) {
@@ -1254,12 +1265,50 @@ router.get('/events', async (req, res) => {
  *               $ref: '#/components/schemas/Error'
  */
 // GET single event
+// GET single event with registration counts and lists
 router.get('/events/:eventID', async (req, res) => {
     try {
         const connection = await pool.getConnection();
-        const [event] = await connection.query('SELECT * FROM Event WHERE eventID = ?', [req.params.eventID]);
-        connection.release();
-        res.json({ success: true, data: event[0] });
+        
+        // Get event with counts
+        const [event] = await connection.query(`
+            SELECT 
+                e.*,
+                COUNT(DISTINCT pe.participantID) as registered_participants,
+                COUNT(DISTINCT ve.volunteerID) as registered_volunteers
+            FROM Event e
+            LEFT JOIN ParticipantEvent pe ON e.eventID = pe.eventID
+            LEFT JOIN VolunteerEvent ve ON e.eventID = ve.eventID
+            WHERE e.eventID = ?
+            GROUP BY e.eventID, max_participants, max_volunteers } = req.body;
+        const created_by = req.user.userID;
+        
+        const connection = await pool.getConnection();
+        
+        // Check if user has staff role (already verified in token, but double-check)
+        const [user] = await connection.query('SELECT role FROM User WHERE userID = ?', [created_by]);
+        
+        if (!user || user.length === 0) {
+            connection.release();
+            return res.status(401).json({ success: false, error: 'User not found' });
+        }
+        
+        if (user[0].role !== 'staff') {
+            connection.release();
+            return res.status(403).json({ success: false, error: 'Only staff members can create events' });
+        }
+        
+        // Create event with capacity limits
+        const [result] = await connection.query(
+            'INSERT INTO Event (eventName, eventDescription, disabled_friendly, datetime, location, additional_information, max_participants, max_volunteers, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [eventName, eventDescription, disabled_friendly, datetime, location, additional_information, max_participants || 10, max_volunteers || 5
+            success: true, 
+            data: {
+                ...event[0],
+                participants,
+                volunteers
+            }
+        });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
@@ -1421,11 +1470,11 @@ router.post('/events', verifyToken, async (req, res) => {
 // UPDATE event
 router.put('/events/:eventID', async (req, res) => {
     try {
-        const { eventName, eventDescription, disabled_friendly, datetime, location, additional_information } = req.body;
+        const { eventName, eventDescription, disabled_friendly, datetime, location, additional_information, max_participants, max_volunteers } = req.body;
         const connection = await pool.getConnection();
         await connection.query(
-            'UPDATE Event SET eventName = ?, eventDescription = ?, disabled_friendly = ?, datetime = ?, location = ?, additional_information = ? WHERE eventID = ?',
-            [eventName, eventDescription, disabled_friendly, datetime, location, additional_information, req.params.eventID]
+            'UPDATE Event SET eventName = ?, eventDescription = ?, disabled_friendly = ?, datetime = ?, location = ?, additional_information = ?, max_participants = ?, max_volunteers = ? WHERE eventID = ?',
+            [eventName, eventDescription, disabled_friendly, datetime, location, additional_information, max_participants, max_volunteers, req.params.eventID]
         );
         connection.release();
         res.json({ success: true, message: 'Event updated' });
@@ -1630,6 +1679,39 @@ router.post('/participant-events', async (req, res) => {
     try {
         const { participantID, eventID } = req.body;
         const connection = await pool.getConnection();
+        
+        // Check if event is full
+        const [event] = await connection.query(`
+            SELECT 
+                e.max_participants,
+                COUNT(pe.participantID) as current_count
+            FROM Event e
+            LEFT JOIN ParticipantEvent pe ON e.eventID = pe.eventID
+            WHERE e.eventID = ?
+            GROUP BY e.eventID
+        `, [eventID]);
+        
+        if (!event || event.length === 0) {
+            connection.release();
+            return res.status(404).json({ success: false, error: 'Event not found' });
+        }
+        
+        if (event[0].current_count >= event[0].max_participants) {
+            connection.release();
+            return res.status(400).json({ success: false, error: 'Event is full' });
+        }
+        
+        // Check if already registered
+        const [existing] = await connection.query(
+            'SELECT * FROM ParticipantEvent WHERE participantID = ? AND eventID = ?',
+            [participantID, eventID]
+        );
+        
+        if (existing.length > 0) {
+            connection.release();
+            return res.status(400).json({ success: false, error: 'Already registered' });
+        }
+        
         await connection.query(
             'INSERT INTO ParticipantEvent (participantID, eventID) VALUES (?, ?)',
             [participantID, eventID]
@@ -1736,7 +1818,40 @@ router.delete('/participant-events/:participantID/:eventID', async (req, res) =>
  */
 // GET volunteers for an event
 router.get('/events/:eventID/volunteers', async (req, res) => {
-    try {
+    try 
+        // Check if event is full
+        const [event] = await connection.query(`
+            SELECT 
+                e.max_volunteers,
+                COUNT(ve.volunteerID) as current_count
+            FROM Event e
+            LEFT JOIN VolunteerEvent ve ON e.eventID = ve.eventID
+            WHERE e.eventID = ?
+            GROUP BY e.eventID
+        `, [eventID]);
+        
+        if (!event || event.length === 0) {
+            connection.release();
+            return res.status(404).json({ success: false, error: 'Event not found' });
+        }
+        
+        if (event[0].current_count >= event[0].max_volunteers) {
+            connection.release();
+            return res.status(400).json({ success: false, error: 'Event is full' });
+        }
+        
+        // Check if already registered
+        const [existing] = await connection.query(
+            'SELECT * FROM VolunteerEvent WHERE volunteerID = ? AND eventID = ?',
+            [volunteerID, eventID]
+        );
+        
+        if (existing.length > 0) {
+            connection.release();
+            return res.status(400).json({ success: false, error: 'Already registered' });
+        }
+        
+        {
         const connection = await pool.getConnection();
         const [volunteers] = await connection.query(
             'SELECT u.*, ve.signed_at FROM VolunteerEvent ve JOIN User u ON ve.volunteerID = u.userID WHERE ve.eventID = ?',
