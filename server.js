@@ -1,14 +1,58 @@
-const { createServer } = require('node:http');
+require('dotenv').config();
+const express = require('express');
+const { pool } = require('./db');
+const apiRoutes = require('./routes/api');
 
-const hostname = '127.0.0.1';
-const port = 3000;
+const app = express();
+const port = 3001;
 
-const server = createServer((req, res) => {
-    res.statusCode = 200;
-    res.setHeader('Content-Type', 'text/plain');
-    res.end('Hello World');
+// Middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// CORS
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    next();
 });
 
-server.listen(port, hostname, () => {
-    console.log(`Server running at http://${hostname}:${port}/`);
+
+
+// Test connection on startup
+pool.getConnection()
+    .then(connection => {
+        console.log('✅ Database connection successful!');
+        connection.release();
+    })
+    .catch(error => {
+        console.error('❌ Database connection failed:', error.message);
+        console.error('📌 Make sure Cloud SQL Proxy is running on port', process.env.DB_PORT || 3307);
+    });
+
+// Routes
+app.use('/api', apiRoutes);
+
+// Health check
+app.get('/health', (req, res) => {
+    res.json({ success: true, message: 'Server is running' });
+});
+
+// 404
+app.use((req, res) => {
+    res.status(404).json({ success: false, message: 'Route not found' });
+});
+
+// Start server
+app.listen(port, () => {
+    console.log(`🚀 Server running at http://localhost:${port}/`);
+    console.log(`📚 API Documentation:`);
+    console.log(`   Users: GET/POST/PUT/DELETE /api/users`);
+    console.log(`   Participants: GET/POST/DELETE /api/participants`);
+    console.log(`   Volunteers: GET/POST/DELETE /api/volunteers`);
+    console.log(`   Staff: GET/POST/PUT/DELETE /api/staff`);
+    console.log(`   Events: GET/POST/PUT/DELETE /api/events`);
+    console.log(`   ParticipantEvent: GET/POST/DELETE /api/participant-events`);
+    console.log(`   VolunteerEvent: GET/POST/DELETE /api/volunteer-events`);
 });
