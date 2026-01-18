@@ -98,6 +98,144 @@ router.delete('/users/:userID', async (req, res) => {
 
 // ==================== AUTHENTICATION ====================
 
+// In-memory OTP storage (for demo/testing - use Redis in production)
+const otpStore = new Map();
+
+// PARTICIPANT - Check or create account and send OTP
+router.post('/participant/check-or-create', async (req, res) => {
+    try {
+        const { phoneNumber, fullName, birthdate } = req.body;
+        
+        if (!phoneNumber || !fullName || !birthdate) {
+            return res.status(400).json({ success: false, error: 'Phone number, full name, and birthdate are required' });
+        }
+        
+        const connection = await pool.getConnection();
+        
+        // Check if user exists with this phone and birthdate
+        const [users] = await connection.query(
+            'SELECT u.*, p.userID as participantID FROM User u LEFT JOIN Participant p ON u.userID = p.userID WHERE u.phone = ? AND u.birthdate = ?',
+            [phoneNumber, birthdate]
+        );
+        
+        let isNewUser = false;
+        let userId;
+        
+        if (!users || users.length === 0) {
+            // Create new user and participant
+            const [userResult] = await connection.query(
+                'INSERT INTO User (fullName, phone, birthdate, role, image_url) VALUES (?, ?, ?, ?, ?)',
+                [fullName, phoneNumber, birthdate, 'participant', '']
+            );
+            userId = userResult.insertId;
+            
+            // Insert into Participant table
+            await connection.query('INSERT INTO Participant (userID) VALUES (?)', [userId]);
+            isNewUser = true;
+        } else {
+            userId = users[0].userID;
+            // Update name if it changed
+            if (users[0].fullName !== fullName) {
+                await connection.query('UPDATE User SET fullName = ? WHERE userID = ?', [fullName, userId]);
+            }
+        }
+        
+        connection.release();
+        
+        // Generate OTP (6 digits) - hardcoded for testing
+        const otp = '123456';
+        
+        // Store OTP with 5 minute expiry
+        otpStore.set(phoneNumber, {
+            otp,
+            userId,
+            expiresAt: Date.now() + 5 * 60 * 1000
+        });
+        
+        // In production, send OTP via SMS
+        console.log(`📱 OTP for ${phoneNumber}: ${otp}`);
+        
+        res.json({ 
+            success: true, 
+            isNewUser,
+            message: isNewUser ? 'Account created. OTP sent.' : 'OTP sent to your phone.',
+            otp // Remove this in production!
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// PARTICIPANT - Verify OTP and login
+router.post('/login-otp', async (req, res) => {
+    try {
+        const { phone, otp } = req.body;
+        
+        if (!phone || !otp) {
+            return res.status(400).json({ success: false, error: 'Phone and OTP are required' });
+        }
+        
+        // Check OTP
+        const storedData = otpStore.get(phone);
+        
+        if (!storedData) {
+            return res.status(401).json({ success: false, error: 'OTP not found or expired' });
+        }
+        
+        if (Date.now() > storedData.expiresAt) {
+            otpStore.delete(phone);
+            return res.status(401).json({ success: false, error: 'OTP expired' });
+        }
+        
+        if (storedData.otp !== otp) {
+            return res.status(401).json({ success: false, error: 'Invalid OTP' });
+        }
+        
+        // OTP is valid, get user data
+        const connection = await pool.getConnection();
+        const [users] = await connection.query(
+            'SELECT userID, fullName, phone, birthdate, role, image_url FROM User WHERE userID = ?',
+            [storedData.userId]
+        );
+        connection.release();
+        
+        if (!users || users.length === 0) {
+            return res.status(404).json({ success: false, error: 'User not found' });
+        }
+        
+        const user = users[0];
+        
+        // Clear OTP
+        otpStore.delete(phone);
+        
+        // Generate JWT token
+        const token = jwt.sign(
+            { 
+                userID: user.userID, 
+                phone: user.phone, 
+                role: user.role 
+            },
+            process.env.JWT_SECRET || 'your_secret_key_change_in_production',
+            { expiresIn: '24h' }
+        );
+        
+        res.json({ 
+            success: true, 
+            token,
+            data: {
+                userID: user.userID,
+                fullName: user.fullName,
+                phone: user.phone,
+                birthdate: user.birthdate,
+                role: user.role,
+                image_url: user.image_url
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // LOGIN - Staff authentication
 router.post('/login', async (req, res) => {
     try {
@@ -350,11 +488,10 @@ router.get('/events', async (req, res) => {
     }
 });
 
-// GET single event with registration counts and lists
+// GET single event with registration counts
 router.get('/events/:eventID', async (req, res) => {
     try {
         const connection = await pool.getConnection();
-        
         // Get event with counts
         const [event] = await connection.query(`
             SELECT 
@@ -365,7 +502,24 @@ router.get('/events/:eventID', async (req, res) => {
             LEFT JOIN ParticipantEvent pe ON e.eventID = pe.eventID
             LEFT JOIN VolunteerEvent ve ON e.eventID = ve.eventID
             WHERE e.eventID = ?
-            GROUP BY e.eventID, max_participants, max_volunteers } = req.body;
+            GROUP BY e.eventID, e.max_participants, e.max_volunteers
+        `, [req.params.eventID]);
+        connection.release();
+        
+        if (!event || event.length === 0) {
+            return res.status(404).json({ success: false, error: 'Event not found' });
+        }
+
+        res.json({ success: true, data: event[0] });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// CREATE event
+router.post('/events', verifyToken, async (req, res) => {
+    try {
+        const { eventName, eventDescription, disabled_friendly, datetime, location, additional_information, max_participants, max_volunteers } = req.body;
         const created_by = req.user.userID;
         
         const connection = await pool.getConnection();
@@ -386,44 +540,7 @@ router.get('/events/:eventID', async (req, res) => {
         // Create event with capacity limits
         const [result] = await connection.query(
             'INSERT INTO Event (eventName, eventDescription, disabled_friendly, datetime, location, additional_information, max_participants, max_volunteers, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [eventName, eventDescription, disabled_friendly, datetime, location, additional_information, max_participants || 10, max_volunteers || 5
-            success: true, 
-            data: {
-                ...event[0],
-                participants,
-                volunteers
-            }
-        });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// CREATE event
-router.post('/events', verifyToken, async (req, res) => {
-    try {
-        const { eventName, eventDescription, disabled_friendly, datetime, location, additional_information } = req.body;
-        const created_by = req.user.userID;
-        
-        const connection = await pool.getConnection();
-        
-        // Check if user has staff role (already verified in token, but double-check)
-        const [user] = await connection.query('SELECT role FROM User WHERE userID = ?', [created_by]);
-        
-        if (!user || user.length === 0) {
-            connection.release();
-            return res.status(401).json({ success: false, error: 'User not found' });
-        }
-        
-        if (user[0].role !== 'staff') {
-            connection.release();
-            return res.status(403).json({ success: false, error: 'Only staff members can create events' });
-        }
-        
-        // Create event
-        const [result] = await connection.query(
-            'INSERT INTO Event (eventName, eventDescription, disabled_friendly, datetime, location, additional_information, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [eventName, eventDescription, disabled_friendly, datetime, location, additional_information, created_by]
+            [eventName, eventDescription, disabled_friendly, datetime, location, additional_information, max_participants || 10, max_volunteers || 5, created_by]
         );
         connection.release();
         res.status(201).json({ success: true, eventID: result.insertId });
@@ -560,40 +677,7 @@ router.delete('/participant-events/:participantID/:eventID', async (req, res) =>
 
 // GET volunteers for an event
 router.get('/events/:eventID/volunteers', async (req, res) => {
-    try 
-        // Check if event is full
-        const [event] = await connection.query(`
-            SELECT 
-                e.max_volunteers,
-                COUNT(ve.volunteerID) as current_count
-            FROM Event e
-            LEFT JOIN VolunteerEvent ve ON e.eventID = ve.eventID
-            WHERE e.eventID = ?
-            GROUP BY e.eventID
-        `, [eventID]);
-        
-        if (!event || event.length === 0) {
-            connection.release();
-            return res.status(404).json({ success: false, error: 'Event not found' });
-        }
-        
-        if (event[0].current_count >= event[0].max_volunteers) {
-            connection.release();
-            return res.status(400).json({ success: false, error: 'Event is full' });
-        }
-        
-        // Check if already registered
-        const [existing] = await connection.query(
-            'SELECT * FROM VolunteerEvent WHERE volunteerID = ? AND eventID = ?',
-            [volunteerID, eventID]
-        );
-        
-        if (existing.length > 0) {
-            connection.release();
-            return res.status(400).json({ success: false, error: 'Already registered' });
-        }
-        
-        {
+    try {
         const connection = await pool.getConnection();
         const [volunteers] = await connection.query(
             'SELECT u.*, ve.signed_at FROM VolunteerEvent ve JOIN User u ON ve.volunteerID = u.userID WHERE ve.eventID = ?',
@@ -626,6 +710,40 @@ router.post('/volunteer-events', async (req, res) => {
     try {
         const { volunteerID, eventID } = req.body;
         const connection = await pool.getConnection();
+
+        // Check if event is full
+        const [event] = await connection.query(`
+            SELECT 
+                e.max_volunteers,
+                COUNT(ve.volunteerID) as current_count
+            FROM Event e
+            LEFT JOIN VolunteerEvent ve ON e.eventID = ve.eventID
+            WHERE e.eventID = ?
+            GROUP BY e.eventID
+        `, [eventID]);
+        
+        if (!event || event.length === 0) {
+            connection.release();
+            return res.status(404).json({ success: false, error: 'Event not found' });
+        }
+        
+        if (event[0].current_count >= event[0].max_volunteers) {
+            connection.release();
+            return res.status(400).json({ success: false, error: 'Event is full' });
+        }
+        
+        // Check if already registered
+        const [existing] = await connection.query(
+            'SELECT * FROM VolunteerEvent WHERE volunteerID = ? AND eventID = ?',
+            [volunteerID, eventID]
+        );
+        
+        if (existing.length > 0) {
+            connection.release();
+            return res.status(400).json({ success: false, error: 'Already registered' });
+        }
+
+        // Sign up
         await connection.query(
             'INSERT INTO VolunteerEvent (volunteerID, eventID) VALUES (?, ?)',
             [volunteerID, eventID]

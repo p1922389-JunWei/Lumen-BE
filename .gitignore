@@ -1,3 +1,5 @@
 /node_modules
 .env
 schema.sql
+gcloud-service-key.json
+.DS_Store
