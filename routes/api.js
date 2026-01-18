@@ -1437,28 +1437,33 @@ router.get('/events/:eventID', async (req, res) => {
             LEFT JOIN ParticipantEvent pe ON e.eventID = pe.eventID
             LEFT JOIN VolunteerEvent ve ON e.eventID = ve.eventID
             WHERE e.eventID = ?
-            GROUP BY e.eventID, max_participants, max_volunteers } = req.body;
-        const created_by = req.user.userID;
+            GROUP BY e.eventID
+        `, [req.params.eventID]);
         
-        const connection = await pool.getConnection();
-        
-        // Check if user has staff role (already verified in token, but double-check)
-        const [user] = await connection.query('SELECT role FROM User WHERE userID = ?', [created_by]);
-        
-        if (!user || user.length === 0) {
+        if (!event || event.length === 0) {
             connection.release();
-            return res.status(401).json({ success: false, error: 'User not found' });
+            return res.status(404).json({ success: false, error: 'Event not found' });
         }
         
-        if (user[0].role !== 'staff') {
-            connection.release();
-            return res.status(403).json({ success: false, error: 'Only staff members can create events' });
-        }
+        // Get registered participants
+        const [participants] = await connection.query(`
+            SELECT u.userID, u.fullName, u.image_url, pe.signed_at
+            FROM ParticipantEvent pe
+            JOIN User u ON pe.participantID = u.userID
+            WHERE pe.eventID = ?
+        `, [req.params.eventID]);
         
-        // Create event with capacity limits
-        const [result] = await connection.query(
-            'INSERT INTO Event (eventName, eventDescription, disabled_friendly, datetime, location, additional_information, max_participants, max_volunteers, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [eventName, eventDescription, disabled_friendly, datetime, location, additional_information, max_participants || 10, max_volunteers || 5
+        // Get registered volunteers
+        const [volunteers] = await connection.query(`
+            SELECT u.userID, u.fullName, u.image_url, ve.signed_at
+            FROM VolunteerEvent ve
+            JOIN User u ON ve.volunteerID = u.userID
+            WHERE ve.eventID = ?
+        `, [req.params.eventID]);
+        
+        connection.release();
+        
+        res.json({ 
             success: true, 
             data: {
                 ...event[0],
@@ -1975,40 +1980,7 @@ router.delete('/participant-events/:participantID/:eventID', async (req, res) =>
  */
 // GET volunteers for an event
 router.get('/events/:eventID/volunteers', async (req, res) => {
-    try 
-        // Check if event is full
-        const [event] = await connection.query(`
-            SELECT 
-                e.max_volunteers,
-                COUNT(ve.volunteerID) as current_count
-            FROM Event e
-            LEFT JOIN VolunteerEvent ve ON e.eventID = ve.eventID
-            WHERE e.eventID = ?
-            GROUP BY e.eventID
-        `, [eventID]);
-        
-        if (!event || event.length === 0) {
-            connection.release();
-            return res.status(404).json({ success: false, error: 'Event not found' });
-        }
-        
-        if (event[0].current_count >= event[0].max_volunteers) {
-            connection.release();
-            return res.status(400).json({ success: false, error: 'Event is full' });
-        }
-        
-        // Check if already registered
-        const [existing] = await connection.query(
-            'SELECT * FROM VolunteerEvent WHERE volunteerID = ? AND eventID = ?',
-            [volunteerID, eventID]
-        );
-        
-        if (existing.length > 0) {
-            connection.release();
-            return res.status(400).json({ success: false, error: 'Already registered' });
-        }
-        
-        {
+    try {
         const connection = await pool.getConnection();
         const [volunteers] = await connection.query(
             'SELECT u.*, ve.signed_at FROM VolunteerEvent ve JOIN User u ON ve.volunteerID = u.userID WHERE ve.eventID = ?',
