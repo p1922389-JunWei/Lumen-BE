@@ -1751,7 +1751,7 @@ router.get('/events/:eventID', async (req, res) => {
  *               start_time:
  *                 type: string
  *                 format: date-time
-*                end_time:
+ *               end_time:
  *                 type: string
  *                 format: date-time
  *               location:
@@ -1810,10 +1810,28 @@ router.post('/events', verifyToken, async (req, res) => {
             return res.status(403).json({ success: false, error: 'Only staff members can create events' });
         }
         
+        // Convert ISO 8601 timestamps to MySQL DATETIME format
+        // Parse the timestamp and convert to a MySQL-compatible format
+        const formatDateTime = (isoString) => {
+            if (!isoString) return null;
+            const date = new Date(isoString);
+            // Create date string in local timezone (YYYY-MM-DD HH:MM:SS)
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+        };
+        
+        const formatted_start_time = formatDateTime(start_time);
+        const formatted_end_time = formatDateTime(end_time);
+        
         // Create event
         const [result] = await connection.query(
-            'INSERT INTO Event (eventName, eventDescription, disabled_friendly, start_time, end_time, location, additional_information, created_by, max_participants, max_volunteers) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [eventName, eventDescription, disabled_friendly, start_time, end_time, location, additional_information, created_by, max_participants, max_volunteers]
+            'INSERT INTO Event (eventName, eventDescription, disabled_friendly, start_time, end_time, location, additional_information, created_by, max_participants, max_volunteers) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [eventName, eventDescription, disabled_friendly, formatted_start_time, formatted_end_time, location, additional_information, created_by, max_participants, max_volunteers]
         );
         connection.release();
         res.status(201).json({ success: true, eventID: result.insertId });
@@ -1850,13 +1868,20 @@ router.post('/events', verifyToken, async (req, res) => {
  *                 type: string
  *               disabled_friendly:
  *                 type: boolean
- *               datetime:
+ *               start_time:
+ *                 type: string
+ *                 format: date-time
+ *               end_time:
  *                 type: string
  *                 format: date-time
  *               location:
  *                 type: string
  *               additional_information:
  *                 type: string
+ *               max_participants:
+ *                 type: integer
+ *               max_volunteers:
+ *                 type: integer
  *     responses:
  *       200:
  *         description: Event updated successfully
