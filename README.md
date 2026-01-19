@@ -74,7 +74,7 @@ A REST API that powers the LUMEN activity management platform, enabling seamless
 
 6. **Start the server**
    ```bash
-   npm run dev
+   npm start
    ```
 
 7. **View API Documentation**
@@ -87,7 +87,6 @@ A REST API that powers the LUMEN activity management platform, enabling seamless
 | Command | Description |
 |---------|-------------|
 | `npm start` | Run production server |
-| `npm run dev` | Run with auto-reload (nodemon) |
 
 ## API Endpoints
 
