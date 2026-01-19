@@ -235,6 +235,11 @@ router.post('/users', async (req, res) => {
  *                 type: string
  *               image_url:
  *                 type: string
+ *               phoneNumber:
+ *                 type: string
+ *               birthdate:
+ *                 type: string
+ *                 format: date
  *     responses:
  *       200:
  *         description: User updated successfully
@@ -251,12 +256,39 @@ router.put('/users/:userID', verifyToken, async (req, res) => {
             return res.status(403).json({ success: false, error: 'You can only update your own profile' });
         }
         
-        const { fullName, image_url } = req.body;
+        const { fullName, image_url, phoneNumber, birthdate } = req.body;
         const connection = await pool.getConnection();
+        
+        // Get user with participant details
+        const [users] = await connection.query(
+            `SELECT u.*, p.phoneNumber, p.birthdate 
+             FROM User u 
+             LEFT JOIN Participant p ON u.userID = p.userID 
+             WHERE u.userID = ?`,
+            [req.params.userID]
+        );
+        
+        if (!users || users.length === 0) {
+            connection.release();
+            return res.status(404).json({ success: false, error: 'User not found' });
+        }
+        
+        const user = users[0];
+        
+        // Update User table (only update if provided, otherwise keep existing)
         await connection.query(
             'UPDATE User SET fullName = ?, image_url = ? WHERE userID = ?',
-            [fullName, image_url, req.params.userID]
+            [fullName || user.fullName, image_url !== undefined ? image_url : user.image_url, req.params.userID]
         );
+        
+        // Update Participant table if user is a participant
+        if (user.role === 'participant') {
+            await connection.query(
+                'UPDATE Participant SET phoneNumber = ?, birthdate = ?, full_name = ? WHERE userID = ?',
+                [phoneNumber || user.phoneNumber, birthdate || user.birthdate, fullName || user.fullName, req.params.userID]
+            );
+        }
+        
         connection.release();
         res.json({ success: true, message: 'User updated' });
     } catch (error) {
@@ -488,17 +520,20 @@ router.post('/participant/check-or-create', async (req, res) => {
         
         const connection = await pool.getConnection();
         
-        // Step 1: Check if fullName exists in User table
-        let [existingUsers] = await connection.query(
-            `SELECT userID, fullName, role, image_url FROM User WHERE fullName = ?`,
-            [fullName]
+        // Check if phone number is already registered (phone is the unique identifier)
+        const [existingParticipant] = await connection.query(
+            `SELECT p.userID, p.phoneNumber, p.birthdate, u.fullName, u.role, u.image_url 
+             FROM Participant p 
+             JOIN User u ON p.userID = u.userID 
+             WHERE p.phoneNumber = ?`,
+            [phoneNumber]
         );
         
         let isNewUser = false;
         let user;
         
-        if (!existingUsers || existingUsers.length === 0) {
-            // User doesn't exist - create new User and Participant
+        if (!existingParticipant || existingParticipant.length === 0) {
+            // Phone not registered - create new User and Participant
             isNewUser = true;
             
             try {
@@ -512,11 +547,10 @@ router.post('/participant/check-or-create', async (req, res) => {
                 console.log('Created new User with ID:', newUserID);
                 
                 // Then create Participant with the new userID
-                const [participantResult] = await connection.query(
+                await connection.query(
                     'INSERT INTO Participant (userID, phoneNumber, birthdate, full_name) VALUES (?, ?, ?, ?)',
                     [newUserID, phoneNumber, birthdate, fullName]
                 );
-                console.log('Created new Participant:', participantResult);
                 
                 user = {
                     userID: newUserID,
@@ -531,61 +565,32 @@ router.post('/participant/check-or-create', async (req, res) => {
                 return res.status(500).json({ success: false, error: 'Failed to create account: ' + insertError.message });
             }
         } else {
-            // User exists - check if they have a Participant entry
-            const existingUser = existingUsers[0];
+            // Phone exists - verify fullName and birthdate match
+            const existing = existingParticipant[0];
             
-            // Check if Participant record exists for this user
-            let [existingParticipants] = await connection.query(
-                `SELECT userID, phoneNumber, birthdate FROM Participant WHERE userID = ?`,
-                [existingUser.userID]
-            );
+            // Normalize dates for comparison (handle timezone issues)
+            const existingDate = existing.birthdate;
+            const existingBirthdate = existingDate ? 
+                `${existingDate.getFullYear()}-${String(existingDate.getMonth() + 1).padStart(2, '0')}-${String(existingDate.getDate()).padStart(2, '0')}` : null;
             
-            if (!existingParticipants || existingParticipants.length === 0) {
-                // User exists but no Participant entry - create it
-                await connection.query(
-                    'INSERT INTO Participant (userID, phoneNumber, birthdate, full_name) VALUES (?, ?, ?, ?)',
-                    [existingUser.userID, phoneNumber, birthdate, existingUser.fullName]
-                );
-                
-                user = {
-                    userID: existingUser.userID,
-                    fullName: existingUser.fullName,
-                    phoneNumber: phoneNumber,
-                    birthdate: birthdate,
-                    role: existingUser.role
-                };
-            } else {
-                // Participant exists - verify phone and birthdate match
-                const existing = existingParticipants[0];
-                
-                // Normalize dates for comparison (handle timezone issues)
-                // Extract just the date part without timezone conversion
-                const existingDate = existing.birthdate;
-                const existingBirthdate = existingDate ? 
-                    `${existingDate.getFullYear()}-${String(existingDate.getMonth() + 1).padStart(2, '0')}-${String(existingDate.getDate()).padStart(2, '0')}` : null;
-                
-                // Input birthdate comes as YYYY-MM-DD string from frontend
-                const inputBirthdate = birthdate.split('T')[0]; // In case it has time component
-                
-                console.log('Comparing - Stored:', existingBirthdate, '| Input:', inputBirthdate);
-                console.log('Comparing - Stored phone:', existing.phoneNumber, '| Input phone:', phoneNumber);
-                
-                if (existing.phoneNumber !== phoneNumber || existingBirthdate !== inputBirthdate) {
-                    connection.release();
-                    return res.status(401).json({ 
-                        success: false, 
-                        error: 'Credentials do not match. Please check your phone number and birthdate.' 
-                    });
-                }
-                
-                user = {
-                    userID: existingUser.userID,
-                    fullName: existingUser.fullName,
-                    phoneNumber: existing.phoneNumber,
-                    birthdate: existing.birthdate,
-                    role: existingUser.role
-                };
+            // Input birthdate comes as YYYY-MM-DD string from frontend
+            const inputBirthdate = birthdate.split('T')[0];
+            
+            if (existing.fullName !== fullName || existingBirthdate !== inputBirthdate) {
+                connection.release();
+                return res.status(401).json({ 
+                    success: false, 
+                    error: 'Credentials do not match. Please check your name and birthdate.' 
+                });
             }
+            
+            user = {
+                userID: existing.userID,
+                fullName: existing.fullName,
+                phoneNumber: existing.phoneNumber,
+                birthdate: existing.birthdate,
+                role: existing.role
+            };
         }
         
         connection.release();
@@ -897,6 +902,17 @@ router.post('/participants', async (req, res) => {
         
         const connection = await pool.getConnection();
         
+        // Check if phone number is already registered
+        const [existingPhone] = await connection.query(
+            'SELECT userID FROM Participant WHERE phoneNumber = ?',
+            [phoneNumber]
+        );
+        
+        if (existingPhone && existingPhone.length > 0) {
+            connection.release();
+            return res.status(400).json({ success: false, error: 'This phone number is already registered' });
+        }
+        
         // Insert into User table
         const [userResult] = await connection.query(
             'INSERT INTO User (fullName, role, image_url) VALUES (?, ?, ?)',
@@ -1180,10 +1196,12 @@ router.get('/staff', async (req, res) => {
  * @swagger
  * /api/staff:
  *   post:
- *     summary: Create a new staff member
- *     description: Create a new staff member with email and password
+ *     summary: Create a new staff member (Admin only)
+ *     description: Create a new staff member with email and password. Only authenticated staff/admin can create new staff accounts.
  *     tags:
  *       - Staff
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -1216,6 +1234,10 @@ router.get('/staff', async (req, res) => {
  *                   type: boolean
  *                 userID:
  *                   type: integer
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *       403:
+ *         description: Forbidden - only staff/admin can create staff accounts
  *       500:
  *         description: Server error
  *         content:
@@ -1223,9 +1245,14 @@ router.get('/staff', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// CREATE staff
-router.post('/staff', async (req, res) => {
+// CREATE staff (Admin only)
+router.post('/staff', verifyToken, async (req, res) => {
     try {
+        // Only allow staff/admin to create new staff accounts
+        if (req.user.role !== 'staff') {
+            return res.status(403).json({ success: false, error: 'Only admin/staff can create staff accounts' });
+        }
+        
         const { fullName, email, password, image_url } = req.body;
         
         if (!fullName || !email || !password) {
@@ -1233,6 +1260,13 @@ router.post('/staff', async (req, res) => {
         }
         
         const connection = await pool.getConnection();
+        
+        // Check if email already exists
+        const [existingStaff] = await connection.query('SELECT userID FROM Staff WHERE email = ?', [email]);
+        if (existingStaff && existingStaff.length > 0) {
+            connection.release();
+            return res.status(400).json({ success: false, error: 'Email already registered' });
+        }
         
         // Hash the password
         const hashedPassword = await bcrypt.hash(password, 10);
