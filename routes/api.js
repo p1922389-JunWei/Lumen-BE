@@ -1440,7 +1440,7 @@ router.get('/events', async (req, res) => {
             LEFT JOIN ParticipantEvent pe ON e.eventID = pe.eventID
             LEFT JOIN VolunteerEvent ve ON e.eventID = ve.eventID
             GROUP BY e.eventID
-            ORDER BY e.datetime DESC
+            ORDER BY e.start_time DESC
         `);
         connection.release();
         res.json({ success: true, data: events });
@@ -1557,7 +1557,8 @@ router.get('/events/:eventID', async (req, res) => {
  *             required:
  *               - eventName
  *               - eventDescription
- *               - datetime
+ *               - start_time
+*                - end_time
  *               - location
  *             properties:
  *               eventName:
@@ -1566,7 +1567,10 @@ router.get('/events/:eventID', async (req, res) => {
  *                 type: string
  *               disabled_friendly:
  *                 type: boolean
- *               datetime:
+ *               start_time:
+ *                 type: string
+ *                 format: date-time
+*                end_time:
  *                 type: string
  *                 format: date-time
  *               location:
@@ -1607,7 +1611,7 @@ router.get('/events/:eventID', async (req, res) => {
 // CREATE event
 router.post('/events', verifyToken, async (req, res) => {
     try {
-        const { eventName, eventDescription, disabled_friendly, datetime, location, additional_information, max_participants, max_volunteers } = req.body;
+        const { eventName, eventDescription, disabled_friendly, start_time, end_time, location, additional_information, max_participants, max_volunteers } = req.body;
         const created_by = req.user.userID;
         
         const connection = await pool.getConnection();
@@ -1627,8 +1631,8 @@ router.post('/events', verifyToken, async (req, res) => {
         
         // Create event
         const [result] = await connection.query(
-            'INSERT INTO Event (eventName, eventDescription, disabled_friendly, datetime, location, additional_information, created_by, max_participants, max_volunteers) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [eventName, eventDescription, disabled_friendly, datetime, location, additional_information, created_by, max_participants, max_volunteers]
+            'INSERT INTO Event (eventName, eventDescription, disabled_friendly, start_time, end_time, location, additional_information, created_by, max_participants, max_volunteers) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [eventName, eventDescription, disabled_friendly, start_time, end_time, location, additional_information, created_by, max_participants, max_volunteers]
         );
         connection.release();
         res.status(201).json({ success: true, eventID: result.insertId });
@@ -1694,11 +1698,11 @@ router.post('/events', verifyToken, async (req, res) => {
 // UPDATE event
 router.put('/events/:eventID', async (req, res) => {
     try {
-        const { eventName, eventDescription, disabled_friendly, datetime, location, additional_information, max_participants, max_volunteers } = req.body;
+        const { eventName, eventDescription, disabled_friendly, start_time, end_time, location, additional_information, max_participants, max_volunteers } = req.body;
         const connection = await pool.getConnection();
         await connection.query(
-            'UPDATE Event SET eventName = ?, eventDescription = ?, disabled_friendly = ?, datetime = ?, location = ?, additional_information = ?, max_participants = ?, max_volunteers = ? WHERE eventID = ?',
-            [eventName, eventDescription, disabled_friendly, datetime, location, additional_information, max_participants, max_volunteers, req.params.eventID]
+            'UPDATE Event SET eventName = ?, eventDescription = ?, disabled_friendly = ?, start_time = ?, end_time = ?, location = ?, additional_information = ?, max_participants = ?, max_volunteers = ? WHERE eventID = ?',
+            [eventName, eventDescription, disabled_friendly, start_time, end_time, location, additional_information, max_participants, max_volunteers, req.params.eventID]
         );
         connection.release();
         res.json({ success: true, message: 'Event updated' });
