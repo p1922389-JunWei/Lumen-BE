@@ -1607,7 +1607,7 @@ router.get('/events/:eventID', async (req, res) => {
 // CREATE event
 router.post('/events', verifyToken, async (req, res) => {
     try {
-        const { eventName, eventDescription, disabled_friendly, datetime, location, additional_information } = req.body;
+        const { eventName, eventDescription, disabled_friendly, datetime, location, additional_information, max_participants, max_volunteers } = req.body;
         const created_by = req.user.userID;
         
         const connection = await pool.getConnection();
@@ -1627,8 +1627,8 @@ router.post('/events', verifyToken, async (req, res) => {
         
         // Create event
         const [result] = await connection.query(
-            'INSERT INTO Event (eventName, eventDescription, disabled_friendly, datetime, location, additional_information, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [eventName, eventDescription, disabled_friendly, datetime, location, additional_information, created_by]
+            'INSERT INTO Event (eventName, eventDescription, disabled_friendly, datetime, location, additional_information, created_by, max_participants, max_volunteers) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [eventName, eventDescription, disabled_friendly, datetime, location, additional_information, created_by, max_participants, max_volunteers]
         );
         connection.release();
         res.status(201).json({ success: true, eventID: result.insertId });
