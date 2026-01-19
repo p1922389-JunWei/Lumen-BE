@@ -978,6 +978,97 @@ router.delete('/participants/:userID', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/participants/{userID}:
+ *   put:
+ *     summary: Update a participant
+ *     description: Update participant information
+ *     tags:
+ *       - Participants
+ *     parameters:
+ *       - in: path
+ *         name: userID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The participant user ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               fullName:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               phoneNumber:
+ *                 type: string
+ *               birthdate:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Participant updated successfully
+ *       500:
+ *         description: Server error
+ */
+// UPDATE participant
+router.put('/participants/:userID', async (req, res) => {
+    try {
+        const { fullName, email, phoneNumber, birthdate } = req.body;
+        const connection = await pool.getConnection();
+        
+        // Update User table
+        const userUpdateFields = [];
+        const userUpdateValues = [];
+        
+        if (fullName) {
+            userUpdateFields.push('fullName = ?');
+            userUpdateValues.push(fullName);
+        }
+        if (email) {
+            userUpdateFields.push('email = ?');
+            userUpdateValues.push(email);
+        }
+        
+        if (userUpdateFields.length > 0) {
+            userUpdateValues.push(req.params.userID);
+            await connection.query(
+                `UPDATE User SET ${userUpdateFields.join(', ')} WHERE userID = ?`,
+                userUpdateValues
+            );
+        }
+        
+        // Update Participant table
+        const participantUpdateFields = [];
+        const participantUpdateValues = [];
+        
+        if (phoneNumber !== undefined) {
+            participantUpdateFields.push('phoneNumber = ?');
+            participantUpdateValues.push(phoneNumber);
+        }
+        if (birthdate !== undefined) {
+            participantUpdateFields.push('birthdate = ?');
+            participantUpdateValues.push(birthdate);
+        }
+        
+        if (participantUpdateFields.length > 0) {
+            participantUpdateValues.push(req.params.userID);
+            await connection.query(
+                `UPDATE Participant SET ${participantUpdateFields.join(', ')} WHERE userID = ?`,
+                participantUpdateValues
+            );
+        }
+        
+        connection.release();
+        res.json({ success: true, message: 'Participant updated' });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // ==================== VOLUNTEERS CRUD ====================
 
 /**
@@ -1142,6 +1233,72 @@ router.delete('/volunteers/:userID', async (req, res) => {
         await connection.query('DELETE FROM Volunteers WHERE userID = ?', [req.params.userID]);
         connection.release();
         res.json({ success: true, message: 'Volunteer deleted' });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * @swagger
+ * /api/volunteers/{userID}:
+ *   put:
+ *     summary: Update a volunteer
+ *     description: Update volunteer information
+ *     tags:
+ *       - Volunteers
+ *     parameters:
+ *       - in: path
+ *         name: userID
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: The volunteer user ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               fullName:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Volunteer updated successfully
+ *       500:
+ *         description: Server error
+ */
+// UPDATE volunteer
+router.put('/volunteers/:userID', async (req, res) => {
+    try {
+        const { fullName, email } = req.body;
+        const connection = await pool.getConnection();
+        
+        // Update User table
+        const updateFields = [];
+        const updateValues = [];
+        
+        if (fullName) {
+            updateFields.push('fullName = ?');
+            updateValues.push(fullName);
+        }
+        if (email) {
+            updateFields.push('email = ?');
+            updateValues.push(email);
+        }
+        
+        if (updateFields.length > 0) {
+            updateValues.push(req.params.userID);
+            await connection.query(
+                `UPDATE User SET ${updateFields.join(', ')} WHERE userID = ?`,
+                updateValues
+            );
+        }
+        
+        connection.release();
+        res.json({ success: true, message: 'Volunteer updated' });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
@@ -1331,17 +1488,41 @@ router.post('/staff', verifyToken, async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// UPDATE staff password
+// UPDATE staff 
 router.put('/staff/:userID', async (req, res) => {
     try {
-        const { password } = req.body;
+        const { fullName, email, password } = req.body;
         const connection = await pool.getConnection();
         
-        // Hash the password
-        const hashedPassword = await bcrypt.hash(password, 10);
+        // Update User table for fullName
+        if (fullName) {
+            await connection.query('UPDATE User SET fullName = ? WHERE userID = ?', 
+                [fullName, req.params.userID]);
+        }
         
-        await connection.query('UPDATE Staff SET password = ? WHERE userID = ?', 
-            [hashedPassword, req.params.userID]);
+        // Update Staff table for email and password
+        const staffUpdateFields = [];
+        const staffUpdateValues = [];
+        
+        if (email) {
+            staffUpdateFields.push('email = ?');
+            staffUpdateValues.push(email);
+        }
+        if (password) {
+            // Hash the password
+            const hashedPassword = await bcrypt.hash(password, 10);
+            staffUpdateFields.push('password = ?');
+            staffUpdateValues.push(hashedPassword);
+        }
+        
+        if (staffUpdateFields.length > 0) {
+            staffUpdateValues.push(req.params.userID);
+            await connection.query(
+                `UPDATE Staff SET ${staffUpdateFields.join(', ')} WHERE userID = ?`,
+                staffUpdateValues
+            );
+        }
+        
         connection.release();
         res.json({ success: true, message: 'Staff updated' });
     } catch (error) {
