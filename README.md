@@ -58,29 +58,29 @@ A REST API that powers the LUMEN activity management platform, enabling seamless
    mysql -u your_username -p < schema.sql
    ```
 
-5. **Start the server**
+5. **Connect to Google Cloud SQL**
+   
+   Authenticate with Google Cloud:
+   ```bash
+   gcloud auth application-default login
+   ```
+   
+   Start the Cloud SQL Proxy:
+   ```bash
+   ./cloud-sql-proxy h4good-good-people:asia-southeast1:h4good --port 3307
+   ```
+   
+   Keep this running in a separate terminal.
+
+6. **Start the server**
    ```bash
    npm run dev
    ```
 
-6. **View API Documentation**
+7. **View API Documentation**
    ```
    http://localhost:3001/api-docs
    ```
-
-## Google Cloud SQL (Optional)
-
-If using Google Cloud SQL, start the proxy first:
-
-```bash
-cloud-sql-proxy --port=3307 <PROJECT_ID>:<REGION>:<INSTANCE_NAME> &
-```
-
-Then update your `.env`:
-```env
-DB_HOST=127.0.0.1
-DB_PORT=3307
-```
 
 ## Available Scripts
 
