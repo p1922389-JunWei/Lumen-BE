@@ -1014,7 +1014,7 @@ router.get('/volunteers', async (req, res) => {
     try {
         const connection = await pool.getConnection();
         const [volunteers] = await connection.query(
-            'SELECT u.*, v.created_at FROM Volunteers v JOIN User u ON v.userID = u.userID'
+            'SELECT u.userID, u.fullName, u.role, u.image_url, v.email, v.created_at FROM Volunteers v JOIN User u ON v.userID = u.userID'
         );
         connection.release();
         res.json({ success: true, data: volunteers });
@@ -1183,7 +1183,7 @@ router.get('/staff', async (req, res) => {
     try {
         const connection = await pool.getConnection();
         const [staff] = await connection.query(
-            'SELECT u.userID, u.fullName, u.role, u.image_url, s.created_at FROM Staff s JOIN User u ON s.userID = u.userID'
+            'SELECT u.userID, u.fullName, u.role, u.image_url, s.email, s.created_at FROM Staff s JOIN User u ON s.userID = u.userID'
         );
         connection.release();
         res.json({ success: true, data: staff });
