@@ -30,6 +30,84 @@ const verifyToken = (req, res, next) => {
 
 /**
  * @swagger
+ * /api/me:
+ *   get:
+ *     summary: Get current user profile
+ *     description: Retrieve the profile of the currently authenticated user based on their access token
+ *     tags:
+ *       - Users
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: User profile retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   $ref: '#/components/schemas/User'
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *       500:
+ *         description: Server error
+ */
+// GET current user from token
+router.get('/me', verifyToken, async (req, res) => {
+    try {
+        const userID = req.user.userID;
+        const connection = await pool.getConnection();
+        
+        // Get base user info
+        const [users] = await connection.query('SELECT * FROM User WHERE userID = ?', [userID]);
+        
+        if (!users || users.length === 0) {
+            connection.release();
+            return res.status(404).json({ success: false, error: 'User not found' });
+        }
+        
+        const user = users[0];
+        
+        // Get additional info based on role
+        let additionalInfo = {};
+        
+        if (user.role === 'staff') {
+            const [staff] = await connection.query('SELECT email FROM Staff WHERE userID = ?', [userID]);
+            if (staff && staff.length > 0) {
+                additionalInfo.email = staff[0].email;
+            }
+        } else if (user.role === 'volunteer') {
+            const [volunteer] = await connection.query('SELECT email FROM Volunteers WHERE userID = ?', [userID]);
+            if (volunteer && volunteer.length > 0) {
+                additionalInfo.email = volunteer[0].email;
+            }
+        } else if (user.role === 'participant') {
+            const [participant] = await connection.query('SELECT phoneNumber, birthdate FROM Participant WHERE userID = ?', [userID]);
+            if (participant && participant.length > 0) {
+                additionalInfo.phoneNumber = participant[0].phoneNumber;
+                additionalInfo.birthdate = participant[0].birthdate;
+            }
+        }
+        
+        connection.release();
+        
+        res.json({ 
+            success: true, 
+            data: {
+                ...user,
+                ...additionalInfo
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * @swagger
  * /api/users:
  *   get:
  *     summary: Get all users
@@ -64,52 +142,6 @@ router.get('/users', async (req, res) => {
         const [users] = await connection.query('SELECT * FROM User');
         connection.release();
         res.json({ success: true, data: users });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-/**
- * @swagger
- * /api/users/{userID}:
- *   get:
- *     summary: Get a single user
- *     description: Retrieve details of a specific user by ID
- *     tags:
- *       - Users
- *     parameters:
- *       - in: path
- *         name: userID
- *         schema:
- *           type: integer
- *         required: true
- *         description: The user ID
- *     responses:
- *       200:
- *         description: User retrieved successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   $ref: '#/components/schemas/User'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-// GET single user
-router.get('/users/:userID', async (req, res) => {
-    try {
-        const connection = await pool.getConnection();
-        const [user] = await connection.query('SELECT * FROM User WHERE userID = ?', [req.params.userID]);
-        connection.release();
-        res.json({ success: true, data: user[0] });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
@@ -179,10 +211,12 @@ router.post('/users', async (req, res) => {
  * @swagger
  * /api/users/{userID}:
  *   put:
- *     summary: Update a user
- *     description: Update user information
+ *     summary: Update own user profile
+ *     description: Update user information (only for the authenticated user's own profile)
  *     tags:
  *       - Users
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: userID
@@ -199,38 +233,29 @@ router.post('/users', async (req, res) => {
  *             properties:
  *               fullName:
  *                 type: string
- *               role:
- *                 type: string
- *                 enum: [participant, volunteer, staff]
  *               image_url:
  *                 type: string
  *     responses:
  *       200:
  *         description: User updated successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 message:
- *                   type: string
+ *       403:
+ *         description: Forbidden - can only update own profile
  *       500:
  *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
  */
-// UPDATE user
-router.put('/users/:userID', async (req, res) => {
+// UPDATE user (only own profile)
+router.put('/users/:userID', verifyToken, async (req, res) => {
     try {
-        const { fullName, role, image_url } = req.body;
+        // Only allow user to update their own profile
+        if (req.user.userID !== parseInt(req.params.userID)) {
+            return res.status(403).json({ success: false, error: 'You can only update your own profile' });
+        }
+        
+        const { fullName, image_url } = req.body;
         const connection = await pool.getConnection();
         await connection.query(
-            'UPDATE User SET fullName = ?, role = ?, image_url = ? WHERE userID = ?',
-            [fullName, role, image_url, req.params.userID]
+            'UPDATE User SET fullName = ?, image_url = ? WHERE userID = ?',
+            [fullName, image_url, req.params.userID]
         );
         connection.release();
         res.json({ success: true, message: 'User updated' });
@@ -243,10 +268,12 @@ router.put('/users/:userID', async (req, res) => {
  * @swagger
  * /api/users/{userID}:
  *   delete:
- *     summary: Delete a user
- *     description: Remove a user from the system
+ *     summary: Delete own user account
+ *     description: Delete user account (only for the authenticated user's own account)
  *     tags:
  *       - Users
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: userID
@@ -257,26 +284,27 @@ router.put('/users/:userID', async (req, res) => {
  *     responses:
  *       200:
  *         description: User deleted successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 message:
- *                   type: string
+ *       403:
+ *         description: Forbidden - can only delete own account
  *       500:
  *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
  */
-// DELETE user
-router.delete('/users/:userID', async (req, res) => {
+// DELETE user (only own account)
+router.delete('/users/:userID', verifyToken, async (req, res) => {
     try {
+        // Only allow user to delete their own account
+        if (req.user.userID !== parseInt(req.params.userID)) {
+            return res.status(403).json({ success: false, error: 'You can only delete your own account' });
+        }
+        
         const connection = await pool.getConnection();
+        
+        // Delete from role-specific tables first (due to foreign key constraints)
+        await connection.query('DELETE FROM Staff WHERE userID = ?', [req.params.userID]);
+        await connection.query('DELETE FROM Volunteers WHERE userID = ?', [req.params.userID]);
+        await connection.query('DELETE FROM Participant WHERE userID = ?', [req.params.userID]);
+        
+        // Delete from User table
         await connection.query('DELETE FROM User WHERE userID = ?', [req.params.userID]);
         connection.release();
         res.json({ success: true, message: 'User deleted' });
