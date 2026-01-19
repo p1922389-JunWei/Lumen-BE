@@ -2114,9 +2114,12 @@ router.post('/participant-events', async (req, res) => {
         const { participantID, eventID } = req.body;
         const connection = await pool.getConnection();
         
-        // Check if event is full
+        // Get the event details including time
         const [event] = await connection.query(`
             SELECT 
+                e.eventID,
+                e.start_time,
+                e.end_time,
                 e.max_participants,
                 COUNT(pe.participantID) as current_count
             FROM Event e
@@ -2130,7 +2133,8 @@ router.post('/participant-events', async (req, res) => {
             return res.status(404).json({ success: false, error: 'Event not found' });
         }
         
-        if (event[0].current_count >= event[0].max_participants) {
+        // Check if event is full (only if max_participants is set)
+        if (event[0].max_participants !== null && event[0].current_count >= event[0].max_participants) {
             connection.release();
             return res.status(400).json({ success: false, error: 'Event is full' });
         }
@@ -2144,6 +2148,27 @@ router.post('/participant-events', async (req, res) => {
         if (existing.length > 0) {
             connection.release();
             return res.status(400).json({ success: false, error: 'Already registered' });
+        }
+        
+        // Check for time slot conflicts with other registered events
+        const [conflictingEvents] = await connection.query(`
+            SELECT e.eventID, e.eventName, e.start_time, e.end_time
+            FROM ParticipantEvent pe
+            JOIN Event e ON pe.eventID = e.eventID
+            WHERE pe.participantID = ?
+            AND (
+                (e.start_time < ? AND e.end_time > ?) OR
+                (e.start_time < ? AND e.end_time > ?) OR
+                (e.start_time >= ? AND e.end_time <= ?)
+            )
+        `, [participantID, event[0].end_time, event[0].start_time, event[0].end_time, event[0].start_time, event[0].start_time, event[0].end_time]);
+        
+        if (conflictingEvents.length > 0) {
+            connection.release();
+            return res.status(400).json({ 
+                success: false, 
+                error: `You already have an event "${conflictingEvents[0].eventName}" scheduled during this time slot` 
+            });
         }
         
         await connection.query(
@@ -2362,6 +2387,85 @@ router.post('/volunteer-events', async (req, res) => {
     try {
         const { volunteerID, eventID } = req.body;
         const connection = await pool.getConnection();
+        
+        // Get event details including time
+        const [event] = await connection.query(`
+            SELECT 
+                e.eventID,
+                e.eventName,
+                e.start_time,
+                e.end_time,
+                e.max_volunteers,
+                COUNT(ve.volunteerID) as current_count
+            FROM Event e
+            LEFT JOIN VolunteerEvent ve ON e.eventID = ve.eventID
+            WHERE e.eventID = ?
+            GROUP BY e.eventID
+        `, [eventID]);
+        
+        if (!event || event.length === 0) {
+            connection.release();
+            return res.status(404).json({ success: false, error: 'Event not found' });
+        }
+        
+        // Check if event is full (only if max_volunteers is set)
+        if (event[0].max_volunteers !== null && event[0].current_count >= event[0].max_volunteers) {
+            connection.release();
+            return res.status(400).json({ success: false, error: 'Event is full' });
+        }
+        
+        // Check if already registered
+        const [existing] = await connection.query(
+            'SELECT * FROM VolunteerEvent WHERE volunteerID = ? AND eventID = ?',
+            [volunteerID, eventID]
+        );
+        
+        if (existing.length > 0) {
+            connection.release();
+            return res.status(400).json({ success: false, error: 'Already registered for this event' });
+        }
+        
+        // Check for time slot conflicts with other events (both as volunteer and participant)
+        const newStart = event[0].start_time;
+        const newEnd = event[0].end_time;
+        
+        // Check volunteer events for time conflicts
+        const [volunteerConflicts] = await connection.query(`
+            SELECT e.eventID, e.eventName, e.start_time, e.end_time
+            FROM VolunteerEvent ve
+            JOIN Event e ON ve.eventID = e.eventID
+            WHERE ve.volunteerID = ?
+            AND e.eventID != ?
+            AND (
+                (e.start_time < ? AND e.end_time > ?) OR
+                (e.start_time >= ? AND e.start_time < ?) OR
+                (e.end_time > ? AND e.end_time <= ?)
+            )
+        `, [volunteerID, eventID, newEnd, newStart, newStart, newEnd, newStart, newEnd]);
+        
+        // Check participant events for time conflicts
+        const [participantConflicts] = await connection.query(`
+            SELECT e.eventID, e.eventName, e.start_time, e.end_time
+            FROM ParticipantEvent pe
+            JOIN Event e ON pe.eventID = e.eventID
+            WHERE pe.participantID = ?
+            AND (
+                (e.start_time < ? AND e.end_time > ?) OR
+                (e.start_time >= ? AND e.start_time < ?) OR
+                (e.end_time > ? AND e.end_time <= ?)
+            )
+        `, [volunteerID, newEnd, newStart, newStart, newEnd, newStart, newEnd]);
+        
+        const allConflicts = [...volunteerConflicts, ...participantConflicts];
+        
+        if (allConflicts.length > 0) {
+            connection.release();
+            return res.status(400).json({ 
+                success: false, 
+                error: `Time conflict with "${allConflicts[0].eventName}". You cannot register for events with overlapping time slots.`
+            });
+        }
+        
         await connection.query(
             'INSERT INTO VolunteerEvent (volunteerID, eventID) VALUES (?, ?)',
             [volunteerID, eventID]
